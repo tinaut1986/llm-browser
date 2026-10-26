@@ -1,0 +1,68 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #1e1f24; color: #e6e6e6; font: 13px system-ui, sans-serif; user-select: none; overflow: hidden; }
+  #tabs { display: flex; gap: 2px; padding: 6px 6px 0; height: 38px; align-items: flex-end; overflow: hidden; }
+  .tab { display: flex; align-items: center; gap: 6px; max-width: 200px; min-width: 60px; flex: 1 1 160px; height: 30px; padding: 0 8px; background: #2a2c33; border-radius: 8px 8px 0 0; cursor: default; }
+  .tab.active { background: #3a3d46; }
+  .tab span { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .tab button { all: unset; cursor: pointer; padding: 0 4px; border-radius: 4px; opacity: .7; }
+  .tab button:hover { background: #555; opacity: 1; }
+  #plus { all: unset; cursor: pointer; padding: 4px 10px; font-size: 16px; }
+  #bar { display: flex; gap: 6px; align-items: center; padding: 6px; height: 46px; background: #3a3d46; }
+  #bar button { all: unset; cursor: pointer; padding: 4px 9px; border-radius: 6px; font-size: 15px; }
+  #bar button:hover:not(:disabled) { background: #555; }
+  #bar button:disabled { opacity: .3; cursor: default; }
+  #url { flex: 1; height: 30px; padding: 0 12px; border-radius: 15px; border: 0; background: #1e1f24; color: inherit; font: inherit; user-select: text; outline: none; }
+  #url:focus { box-shadow: 0 0 0 2px #6ea8ff; }
+  #act { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; cursor: pointer; background: #2d5a3a; }
+  #act.off { background: #5a2d2d; }
+</style>
+<div id="tabs"></div>
+<div id="bar">
+  <button id="back" title="Atrás">←</button>
+  <button id="fwd" title="Adelante">→</button>
+  <button id="reload" title="Recargar">⟳</button>
+  <input id="url" spellcheck="false" placeholder="Buscar o escribir una dirección">
+  <div id="act" title="Permitir que el modelo haga clic, escriba y navegue (si está apagado, solo puede leer)"></div>
+</div>
+<script>
+  const $ = id => document.getElementById(id);
+  let st = { tabs: [], act: true };
+  $('back').onclick = () => api.cmd('back');
+  $('fwd').onclick = () => api.cmd('forward');
+  $('reload').onclick = () => api.cmd('reload');
+  $('act').onclick = () => api.cmd('act', !st.act);
+  $('url').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { api.cmd('nav', $('url').value); $('url').blur(); }
+    if (e.key === 'Escape') { render(); $('url').blur(); }
+  });
+  $('url').addEventListener('focus', () => $('url').select());
+  window.addEventListener('keydown', e => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.key === 'l') { e.preventDefault(); $('url').focus(); }
+    if (e.key === 't') { e.preventDefault(); api.cmd('newtab'); }
+    if (e.key === 'w') { e.preventDefault(); const a = st.tabs.find(t => t.active); a && api.cmd('close', a.id); }
+  });
+  api.onFocusUrl(() => $('url').focus());
+
+  function render() {
+    const tabs = $('tabs'); tabs.textContent = '';
+    for (const t of st.tabs) {
+      const d = document.createElement('div'); d.className = 'tab' + (t.active ? ' active' : '');
+      d.onclick = () => api.cmd('select', t.id);
+      const s = document.createElement('span'); s.textContent = (t.loading ? '… ' : '') + t.title; d.append(s);
+      const x = document.createElement('button'); x.textContent = '✕'; x.onclick = e => { e.stopPropagation(); api.cmd('close', t.id); }; d.append(x);
+      tabs.append(d);
+    }
+    const p = document.createElement('button'); p.id = 'plus'; p.textContent = '+'; p.onclick = () => api.cmd('newtab'); tabs.append(p);
+    const a = st.tabs.find(t => t.active);
+    if (document.activeElement !== $('url')) $('url').value = a ? a.url : '';
+    $('back').disabled = !st.canBack; $('fwd').disabled = !st.canForward;
+    $('act').className = st.act ? '' : 'off';
+    $('act').textContent = st.act ? '🤖 Modelo: puede actuar' : '👁 Modelo: solo lectura';
+  }
+  api.onState(s => { st = s; render(); });
+  api.cmd('ready');
+</script>
