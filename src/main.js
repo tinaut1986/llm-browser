@@ -6,6 +6,7 @@ const os = require('os');
 const path = require('path');
 const makeTools = require('./tools');
 const cursorScript = require('./cursor');
+const ENGINES = require('./engines');
 
 const TOP = 84; // alto de la barra de UI
 const CONFIG_DIR = path.join(os.homedir(), '.llm-browser');
@@ -18,6 +19,23 @@ let tabs = [];
 let activeId = null;
 let nextId = 1;
 let actEnabled = true;
+
+const SETTINGS_FILE = path.join(CONFIG_DIR, 'settings.json');
+let engine = 'duckduckgo';
+try {
+  const saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')).engine;
+  if (ENGINES[saved]) engine = saved;
+} catch {}
+const homeUrl = () => ENGINES[engine].home;
+function setEngine(id) {
+  if (!ENGINES[id]) return;
+  engine = id;
+  try {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ engine }));
+  } catch {}
+  pushState();
+}
 
 const activeTab = () => tabs.find(t => t.id === activeId);
 
@@ -32,6 +50,8 @@ function pushState() {
   ui.webContents.send('state', {
     tabs: tabs.map(x => ({ id: x.id, title: x.title || x.url || 'Nueva pestaña', url: x.url, active: x.id === activeId, loading: x.loading })),
     act: actEnabled,
+    engine,
+    engines: Object.entries(ENGINES).map(([id, e]) => ({ id, name: e.name })),
     canBack: !!t && t.view.webContents.navigationHistory.canGoBack(),
     canForward: !!t && t.view.webContents.navigationHistory.canGoForward(),
   });
@@ -122,7 +142,7 @@ function closeTab(id) {
   const [t] = tabs.splice(i, 1);
   win.contentView.removeChildView(t.view);
   t.view.webContents.close();
-  if (!tabs.length) newTab('https://duckduckgo.com');
+  if (!tabs.length) newTab(homeUrl());
   else if (activeId === id) selectTab(tabs[Math.max(0, i - 1)].id);
   pushState();
 }
@@ -134,6 +154,7 @@ const call = makeTools({
   closeTab,
   select: selectTab,
   isActEnabled: () => actEnabled,
+  searchUrl: q => ENGINES[engine].search.replace('%s', encodeURIComponent(q)),
 });
 
 function startApi() {
@@ -171,19 +192,20 @@ app.whenReady().then(() => {
   ipcMain.handle('cmd', (_e, cmd, arg) => {
     const w = activeTab()?.view.webContents;
     switch (cmd) {
-      case 'newtab': return selectTab(newTab('https://duckduckgo.com').id);
+      case 'newtab': return selectTab(newTab(homeUrl()).id);
       case 'select': return selectTab(arg);
       case 'close': return closeTab(arg);
       case 'nav': return call('navigate', { url: arg }).catch(() => {}) && undefined;
       case 'back': return w?.navigationHistory.goBack();
       case 'forward': return w?.navigationHistory.goForward();
       case 'reload': return w?.reload();
+      case 'engine': return setEngine(arg);
       case 'act': actEnabled = !!arg; return pushState();
       case 'ready': return pushState();
     }
   });
 
-  newTab('https://duckduckgo.com');
+  newTab(homeUrl());
   startApi();
   layout();
 });

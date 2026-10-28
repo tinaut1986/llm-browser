@@ -57,7 +57,7 @@ def('screenshot', 'Captura de pantalla de la pestaña activa.');
 def('tabs', 'Lista las pestañas abiertas.');
 def('select_tab', 'Cambia de pestaña.', { id: z.number() });
 def('console_logs', 'Mensajes de consola de la pestaña activa.', { clear: z.boolean().optional() });
-def('navigate', 'Navega la pestaña activa a una URL (o busca en DuckDuckGo si no es una URL).', { url: z.string() });
+def('navigate', 'Navega la pestaña activa a una URL (o busca con el buscador elegido en la barra si no es una URL).', { url: z.string() });
 def('back', 'Atrás en el historial.');
 def('forward', 'Adelante en el historial.');
 def('reload', 'Recarga la página.');

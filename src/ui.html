@@ -16,6 +16,7 @@
   #bar button:disabled { opacity: .3; cursor: default; }
   #url { flex: 1; height: 30px; padding: 0 12px; border-radius: 15px; border: 0; background: #1e1f24; color: inherit; font: inherit; user-select: text; outline: none; }
   #url:focus { box-shadow: 0 0 0 2px #6ea8ff; }
+  #engine { height: 30px; padding: 0 6px; border-radius: 6px; border: 0; background: #1e1f24; color: inherit; font: inherit; cursor: pointer; }
   #act { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; cursor: pointer; background: #2d5a3a; }
   #act.off { background: #5a2d2d; }
 </style>
@@ -25,6 +26,7 @@
   <button id="fwd" title="Adelante">→</button>
   <button id="reload" title="Recargar">⟳</button>
   <input id="url" spellcheck="false" placeholder="Buscar o escribir una dirección">
+  <select id="engine" title="Buscador por defecto (pestañas nuevas y búsquedas desde la barra)"></select>
   <div id="act" title="Permitir que el modelo haga clic, escriba y navegue (si está apagado, solo puede leer)"></div>
 </div>
 <script>
@@ -33,6 +35,7 @@
   $('back').onclick = () => api.cmd('back');
   $('fwd').onclick = () => api.cmd('forward');
   $('reload').onclick = () => api.cmd('reload');
+  $('engine').onchange = () => { api.cmd('engine', $('engine').value); $('engine').blur(); };
   $('act').onclick = () => api.cmd('act', !st.act);
   $('url').addEventListener('keydown', e => {
     if (e.key === 'Enter') { api.cmd('nav', $('url').value); $('url').blur(); }
@@ -64,6 +67,9 @@
     const a = st.tabs.find(t => t.active);
     if (document.activeElement !== $('url')) $('url').value = a ? a.url : '';
     $('back').disabled = !st.canBack; $('fwd').disabled = !st.canForward;
+    const eng = $('engine');
+    if (eng.options.length !== (st.engines || []).length) for (const e of st.engines || []) eng.add(new Option(e.name, e.id));
+    eng.value = st.engine;
     $('act').className = st.act ? '' : 'off';
     $('act').textContent = st.act ? '🤖 Modelo: puede actuar' : '👁 Modelo: solo lectura';
   }

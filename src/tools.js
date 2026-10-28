@@ -4,14 +4,14 @@ const cursorScript = require('./cursor');
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-function normalizeUrl(u) {
+function normalizeUrl(u, searchUrl) {
   u = String(u).trim();
   if (/^[a-z][a-z0-9+.-]*:/i.test(u) && !/^[^\s/]+:\d+/.test(u)) return u;
   if (/^(localhost|[\w-]+(\.[\w-]+)+)(:\d+)?(\/|$)/i.test(u)) return (/^localhost|^\d/.test(u) ? 'http://' : 'https://') + u;
-  return 'https://duckduckgo.com/?q=' + encodeURIComponent(u);
+  return searchUrl(u);
 }
 
-// ctx: { tabs(), active(), newTab(url), closeTab(id), select(id), isActEnabled() }
+// ctx: { tabs(), active(), newTab(url), closeTab(id), select(id), isActEnabled(), searchUrl(query) }
 module.exports = function makeTools(ctx) {
   const wc = () => {
     const t = ctx.active();
@@ -107,7 +107,7 @@ module.exports = function makeTools(ctx) {
     // ---- acciones (requieren interruptor activado) ----
     async navigate({ url }) {
       const w = wc();
-      try { await w.loadURL(normalizeUrl(url)); } catch (e) { if (!/ERR_ABORTED/.test(e.message)) throw e; }
+      try { await w.loadURL(normalizeUrl(url, ctx.searchUrl)); } catch (e) { if (!/ERR_ABORTED/.test(e.message)) throw e; }
       await waitLoad(w);
       return { text: `Cargado: ${w.getTitle()} — ${w.getURL()}` };
     },
@@ -115,7 +115,7 @@ module.exports = function makeTools(ctx) {
     async forward() { const w = wc(); w.navigationHistory.goForward(); await waitLoad(w); return { text: w.getURL() }; },
     async reload() { const w = wc(); w.reload(); await waitLoad(w); return { text: w.getURL() }; },
     async new_tab({ url } = {}) {
-      const t = ctx.newTab(url ? normalizeUrl(url) : 'about:blank');
+      const t = ctx.newTab(url ? normalizeUrl(url, ctx.searchUrl) : 'about:blank');
       await waitLoad(t.view.webContents);
       return { text: `Pestaña ${t.id} creada` };
     },
