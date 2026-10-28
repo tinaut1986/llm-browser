@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, Menu, clipboard, ipcMain, session } = require('electron');
+const { app, BrowserWindow, WebContentsView, Menu, clipboard, dialog, ipcMain, session } = require('electron');
 const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -7,6 +7,8 @@ const path = require('path');
 const makeTools = require('./tools');
 const cursorScript = require('./cursor');
 const ENGINES = require('./engines');
+const Bitwarden = require('./bitwarden');
+const { fillLogin, typeFocused } = require('./autofill');
 
 const TOP = 84; // alto de la barra de UI
 const CONFIG_DIR = path.join(os.homedir(), '.llm-browser');
@@ -112,6 +114,7 @@ function newTab(url = 'about:blank') {
       if (input.shift || (mod && k === 'f5')) w.reloadIgnoringCache(); else w.reload();
       return;
     }
+    if (mod && input.shift && k === 'l') { ev.preventDefault(); bitwardenFlow(); return; }
     if (k === 'f6') { ev.preventDefault(); focusUrl(); return; }
     if (!mod) return;
     if (k === 'tab') { ev.preventDefault(); cycleTab(input.shift ? -1 : 1); return; }
@@ -136,6 +139,68 @@ function selectTab(id) {
   win.contentView.addChildView(t.view); // traer al frente
   pushState();
 }
+
+// ---- Bitwarden: lo dispara solo el usuario (botón o Ctrl+Mayús+L); el modelo no tiene herramienta para ello y nunca ve los secretos ----
+const bw = new Bitwarden();
+let bwBusy = false;
+
+function askUnlock() {
+  return new Promise(resolve => {
+    const d = new BrowserWindow({ parent: win, modal: true, width: 360, height: 190, resizable: false, minimizable: false, title: 'Bitwarden', backgroundColor: '#1e1f24',
+      webPreferences: { preload: path.join(__dirname, 'bw-preload.js'), contextIsolation: true, sandbox: true } });
+    d.removeMenu();
+    d.loadFile(path.join(__dirname, 'bw-unlock.html'));
+    let ok = false, trying = false;
+    const onPw = async (_e, pw) => {
+      if (trying) return;
+      trying = true;
+      try { await bw.unlock(pw); ok = true; d.close(); }
+      catch (e) { d.webContents.send('bw-error', e.message.split('\n')[0]); }
+      trying = false;
+    };
+    const onCancel = () => d.close();
+    ipcMain.on('bw-pw', onPw);
+    ipcMain.on('bw-cancel', onCancel);
+    d.on('closed', () => { ipcMain.removeListener('bw-pw', onPw); ipcMain.removeListener('bw-cancel', onCancel); resolve(ok); });
+  });
+}
+
+const note = (message, detail) => dialog.showMessageBox(win, { type: 'info', title: 'Bitwarden', message, detail, buttons: ['Aceptar'] });
+
+async function bitwardenFlow() {
+  if (bwBusy) return;
+  bwBusy = true;
+  try {
+    if (!(await bw.available())) {
+      return await note('No se encuentra la CLI de Bitwarden (bw)', 'La aplicación de escritorio no sirve para esto; hace falta la CLI.\n\nInstalación:\n  npm install -g @bitwarden/cli\no bien\n  sudo snap install bw\n\nDespués inicia sesión una vez en una terminal con:\n  bw login\n\nSi está instalada en otra ruta, arranca el navegador con BW_PATH=/ruta/a/bw.');
+    }
+    let st = await bw.status();
+    if (st === 'unauthenticated') return await note('Falta iniciar sesión en Bitwarden', 'Ejecuta una vez en una terminal:\n  bw login\ny vuelve a pulsar 🔑.');
+    if (st === 'locked' && !(await askUnlock())) return;
+    const t = activeTab();
+    const items = await bw.logins(t.view.webContents.getURL());
+    const w = t.view.webContents;
+    const menu = items.map(i => ({
+      label: i.username ? `${i.name} — ${i.username}` : i.name,
+      click: () => run(async () => {
+        const done = await fillLogin(w, await bw.credentials(i.id));
+        if (!done.username && !done.password) await note('No encuentro un formulario de login a la vista en esta página');
+      }),
+    }));
+    for (const i of items.filter(x => x.hasTotp)) menu.push({ label: `Código 2FA: ${i.name}`, click: () => run(async () => {
+      if (!(await typeFocused(w, await bw.totp(i.id)))) await note('Haz clic primero en el campo del código y vuelve a pulsar 🔑');
+    }) });
+    if (!menu.length) menu.push({ label: 'Sin cuentas para este sitio', enabled: false });
+    menu.push({ type: 'separator' }, { label: 'Bloquear bóveda', click: () => bw.lock() });
+    Menu.buildFromTemplate(menu).popup({ window: win });
+  } catch (e) {
+    dialog.showErrorBox('Bitwarden', e.message);
+  } finally {
+    bwBusy = false;
+  }
+}
+
+const run = fn => fn().catch(e => dialog.showErrorBox('Bitwarden', e.message));
 
 function cycleTab(dir) {
   if (tabs.length < 2) return;
@@ -208,6 +273,7 @@ app.whenReady().then(() => {
       case 'forward': return w?.navigationHistory.goForward();
       case 'reload': return w?.reload();
       case 'engine': return setEngine(arg);
+      case 'bw': return bitwardenFlow();
       case 'cycle': return cycleTab(arg);
       case 'act': actEnabled = !!arg; return pushState();
       case 'ready': return pushState();

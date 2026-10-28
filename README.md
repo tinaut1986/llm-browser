@@ -23,3 +23,7 @@ Antigravity (mcp_config.json):
 
 ## Empaquetar
 `npm run dist` (AppImage en Linux, portable en Windows; hay que ejecutarlo en cada SO).
+
+## Bitwarden
+Botón 🔑 de la barra (o Ctrl+Mayús+L): rellena usuario y contraseña de la página desde la bóveda, o el código 2FA en el campo con foco. Usa la CLI `bw` (la app de escritorio no sirve): `npm i -g @bitwarden/cli` o `sudo snap install bw`, y `bw login` una vez en una terminal. Si está en otra ruta: `BW_PATH=/ruta/bw npm start`. Sin la CLI el navegador funciona igual y el botón explica cómo instalarla.
+La contraseña maestra se pide en una ventana propia y la clave de sesión solo vive en memoria. Lo dispara únicamente el usuario: el modelo no tiene herramienta para ello y nunca ve los secretos.
