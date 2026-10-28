@@ -65,7 +65,7 @@ function layout() {
 }
 
 function newTab(url = 'about:blank') {
-  const view = new WebContentsView({ webPreferences: { partition: PARTITION, sandbox: true, contextIsolation: true } });
+  const view = new WebContentsView({ webPreferences: { partition: PARTITION, sandbox: true, contextIsolation: true, preload: path.join(__dirname, 'page-preload.js') } });
   const t = { id: nextId++, view, title: '', url, loading: false, logs: [] };
   const w = view.webContents;
   tabs.push(t);
@@ -114,6 +114,7 @@ function newTab(url = 'about:blank') {
     }
     if (k === 'f6') { ev.preventDefault(); focusUrl(); return; }
     if (!mod) return;
+    if (k === 'tab') { ev.preventDefault(); cycleTab(input.shift ? -1 : 1); return; }
     if (k === 't') { ev.preventDefault(); selectTab(newTab().id); focusUrl(); }
     else if (k === 'w') { ev.preventDefault(); closeTab(t.id); }
     else if (k === 'l') { ev.preventDefault(); focusUrl(); }
@@ -134,6 +135,13 @@ function selectTab(id) {
   const t = activeTab();
   win.contentView.addChildView(t.view); // traer al frente
   pushState();
+}
+
+function cycleTab(dir) {
+  if (tabs.length < 2) return;
+  const i = tabs.findIndex(t => t.id === activeId);
+  selectTab(tabs[(i + dir + tabs.length) % tabs.length].id);
+  activeTab().view.webContents.focus(); // si no, el teclado se queda en la pestaña ya oculta
 }
 
 function closeTab(id) {
@@ -193,13 +201,14 @@ app.whenReady().then(() => {
     const w = activeTab()?.view.webContents;
     switch (cmd) {
       case 'newtab': return selectTab(newTab(homeUrl()).id);
-      case 'select': return selectTab(arg);
+      case 'select': selectTab(arg); return activeTab().view.webContents.focus();
       case 'close': return closeTab(arg);
       case 'nav': return call('navigate', { url: arg }).catch(() => {}) && undefined;
       case 'back': return w?.navigationHistory.goBack();
       case 'forward': return w?.navigationHistory.goForward();
       case 'reload': return w?.reload();
       case 'engine': return setEngine(arg);
+      case 'cycle': return cycleTab(arg);
       case 'act': actEnabled = !!arg; return pushState();
       case 'ready': return pushState();
     }
