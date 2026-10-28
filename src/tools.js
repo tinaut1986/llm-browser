@@ -1,5 +1,6 @@
 // Implementación de las herramientas sobre las pestañas de Electron.
 const snapshotScript = require('./snapshot');
+const cursorScript = require('./cursor');
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -25,11 +26,33 @@ module.exports = function makeTools(ctx) {
     while (w.isLoading() && Date.now() - start < timeout) await sleep(100);
   }
 
+  // Ratón virtual: el círculo se desliza hasta (x,y) y el puntero real le sigue en pasos, para que los hover reaccionen.
+  const CURSOR_IDLE_MS = 6000;
+  async function showCursor(t, mode) {
+    if (t.view.webContents.isDestroyed()) return;
+    t.cursor.visible = mode !== 'hide';
+    await t.view.webContents.executeJavaScript(cursorScript(t.cursor.x, t.cursor.y, mode), true).catch(() => {});
+    clearTimeout(t.cursor.timer);
+    if (t.cursor.visible) t.cursor.timer = setTimeout(() => showCursor(t, 'hide'), CURSOR_IDLE_MS);
+  }
+
+  async function moveTo(x, y, modifiers = []) {
+    const t = ctx.active(), w = wc();
+    const from = t.cursor || { x, y };
+    t.cursor = { ...from, x, y, visible: from.visible };
+    await showCursor(t, 'move');
+    for (let i = 1; i <= 5; i++) {
+      w.sendInputEvent({ type: 'mouseMove', x: Math.round(from.x + (x - from.x) * i / 5), y: Math.round(from.y + (y - from.y) * i / 5), modifiers });
+      await sleep(40);
+    }
+  }
+
   async function click(x, y, opts = {}) {
     const w = wc();
     const button = opts.button || 'left';
     const clickCount = opts.double ? 2 : 1;
-    w.sendInputEvent({ type: 'mouseMove', x, y });
+    await moveTo(x, y);
+    await showCursor(ctx.active(), 'click');
     for (let i = 1; i <= clickCount; i++) {
       w.sendInputEvent({ type: 'mouseDown', x, y, button, clickCount: i });
       w.sendInputEvent({ type: 'mouseUp', x, y, button, clickCount: i });
@@ -62,8 +85,9 @@ module.exports = function makeTools(ctx) {
     async screenshot() {
       const w = wc();
       let img = await w.capturePage();
-      const { width } = img.getSize();
-      if (width > 1400) img = img.resize({ width: 1400 });
+      // Píxeles de la captura = píxeles CSS de la vista, que son los que usan click/mouse_move/drag.
+      const { width: cssW } = ctx.active().view.getBounds();
+      if (img.getSize().width !== cssW) img = img.resize({ width: cssW });
       return { image: img.toJPEG(80).toString('base64'), mime: 'image/jpeg' };
     },
     async tabs() {
@@ -126,6 +150,26 @@ module.exports = function makeTools(ctx) {
       await waitLoad(w, 3000);
       return { text: `tecla ${key}` };
     },
+    async mouse_move({ x, y }) {
+      await moveTo(x, y);
+      return { text: `ratón en (${x},${y})` };
+    },
+    async drag({ x1, y1, x2, y2 }) {
+      const w = wc(), down = ['leftButtonDown'];
+      await moveTo(x1, y1);
+      w.sendInputEvent({ type: 'mouseDown', x: x1, y: y1, button: 'left', clickCount: 1 });
+      await moveTo(x2, y2, down);
+      w.sendInputEvent({ type: 'mouseUp', x: x2, y: y2, button: 'left', clickCount: 1 });
+      await showCursor(ctx.active(), 'click');
+      await waitLoad(w, 3000);
+      return { text: `arrastrado de (${x1},${y1}) a (${x2},${y2})` };
+    },
+    async wheel({ x, y, dy = 0, dx = 0 }) {
+      await moveTo(x, y);
+      wc().sendInputEvent({ type: 'mouseWheel', x, y, deltaX: -dx, deltaY: -dy });
+      await sleep(150);
+      return { text: `rueda en (${x},${y}) dy=${dy} dx=${dx}` };
+    },
     async scroll({ dy = 600, dx = 0, ref }) {
       const r = await evalIn(`(() => {
         const el = ${ref !== undefined ? `(window.__llmRefs || [])[${Number(ref)}]` : 'null'};
@@ -152,7 +196,7 @@ module.exports = function makeTools(ctx) {
     },
   };
 
-  const ACTIONS = new Set(['navigate', 'back', 'forward', 'reload', 'new_tab', 'close_tab', 'click', 'type', 'press_key', 'scroll', 'select_option', 'evaluate']);
+  const ACTIONS = new Set(['navigate', 'back', 'forward', 'reload', 'new_tab', 'close_tab', 'click', 'mouse_move', 'drag', 'wheel', 'type', 'press_key', 'scroll', 'select_option', 'evaluate']);
 
   return async function call(name, args) {
     if (!tools[name]) throw new Error('Herramienta desconocida: ' + name);

@@ -9,8 +9,9 @@ Navegador Electron (Windows/Linux) que un LLM puede ver y controlar vía MCP.
 
 ## Herramientas
 Lectura: `read_page` (texto + `[ref]` interactivos), `get_text`, `screenshot`, `tabs`, `console_logs`, `select_tab`.
-Acciones: `navigate`, `back`, `forward`, `reload`, `new_tab`, `close_tab`, `click`, `type`, `press_key`, `scroll`, `select_option`, `evaluate`.
+Acciones: `navigate`, `back`, `forward`, `reload`, `new_tab`, `close_tab`, `click`, `mouse_move`, `drag`, `wheel`, `type`, `press_key`, `scroll`, `select_option`, `evaluate`.
 Los `ref` solo valen hasta la siguiente llamada a `read_page`.
+El ratón del modelo es virtual: se ve como un círculo rojo en la página (se desvanece a los 6 s sin uso). `click`, `mouse_move`, `drag` y `wheel` lo mueven y generan eventos de ratón reales; las coordenadas son píxeles de la captura.
 
 ## Registrar
 Claude Code: `claude mcp add llm-browser -- node /ruta/a/llm-browser/src/mcp.js`

@@ -1,10 +1,11 @@
-const { app, BrowserWindow, WebContentsView, ipcMain, session } = require('electron');
+const { app, BrowserWindow, WebContentsView, Menu, clipboard, ipcMain, session } = require('electron');
 const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const makeTools = require('./tools');
+const cursorScript = require('./cursor');
 
 const TOP = 84; // alto de la barra de UI
 const CONFIG_DIR = path.join(os.homedir(), '.llm-browser');
@@ -19,6 +20,11 @@ let nextId = 1;
 let actEnabled = true;
 
 const activeTab = () => tabs.find(t => t.id === activeId);
+
+function focusUrl() {
+  ui.webContents.focus();
+  ui.webContents.send('focus-url');
+}
 
 function pushState() {
   if (!ui || ui.webContents.isDestroyed()) return;
@@ -47,6 +53,7 @@ function newTab(url = 'about:blank') {
   w.on('page-title-updated', (_e, title) => { t.title = title; pushState(); });
   w.on('did-navigate', (_e, u) => { t.url = u; pushState(); });
   w.on('did-navigate-in-page', (_e, u) => { t.url = u; pushState(); });
+  w.on('dom-ready', () => { if (t.cursor?.visible) w.executeJavaScript(cursorScript(t.cursor.x, t.cursor.y, 'move'), true).catch(() => {}); });
   w.on('did-start-loading', () => { t.loading = true; pushState(); });
   w.on('did-stop-loading', () => { t.loading = false; t.url = w.getURL(); pushState(); });
   w.on('console-message', (...a) => {
@@ -55,12 +62,41 @@ function newTab(url = 'about:blank') {
     if (t.logs.length > 500) t.logs.shift();
   });
   w.setWindowOpenHandler(({ url: u }) => { newTab(u); return { action: 'deny' }; });
+  w.on('context-menu', (_e, p) => {
+    const item = (label, click, enabled = true) => ({ label, click, enabled });
+    const sep = { type: 'separator' };
+    const nav = w.navigationHistory;
+    const m = [];
+    if (p.linkURL) m.push(item('Abrir enlace en pestaña nueva', () => newTab(p.linkURL)), item('Copiar dirección del enlace', () => clipboard.writeText(p.linkURL)), sep);
+    if (p.mediaType === 'image') m.push(item('Abrir imagen en pestaña nueva', () => newTab(p.srcURL)), item('Copiar imagen', () => w.copyImageAt(p.x, p.y)), item('Copiar dirección de la imagen', () => clipboard.writeText(p.srcURL)), sep);
+    if (p.isEditable) m.push(
+      item('Cortar', () => w.cut(), p.editFlags.canCut),
+      item('Copiar', () => w.copy(), p.editFlags.canCopy),
+      item('Pegar', () => w.paste(), p.editFlags.canPaste),
+      item('Seleccionar todo', () => w.selectAll(), p.editFlags.canSelectAll), sep);
+    else if (p.selectionText) m.push(item('Copiar', () => w.copy()), sep);
+    m.push(
+      item('Atrás', () => nav.goBack(), nav.canGoBack()),
+      item('Adelante', () => nav.goForward(), nav.canGoForward()),
+      item('Recargar', () => w.reload()),
+      sep,
+      item('Inspeccionar', () => w.inspectElement(p.x, p.y)));
+    Menu.buildFromTemplate(m).popup({ window: win });
+  });
   w.on('before-input-event', (ev, input) => {
-    if (input.type !== 'keyDown' || !(input.control || input.meta)) return;
+    if (input.type !== 'keyDown') return;
+    const mod = input.control || input.meta;
     const k = input.key.toLowerCase();
-    if (k === 't') { ev.preventDefault(); selectTab(newTab().id); ui.webContents.focus(); ui.webContents.send('focus-url'); }
+    if (k === 'f5' || (mod && k === 'r')) {
+      ev.preventDefault();
+      if (input.shift || (mod && k === 'f5')) w.reloadIgnoringCache(); else w.reload();
+      return;
+    }
+    if (k === 'f6') { ev.preventDefault(); focusUrl(); return; }
+    if (!mod) return;
+    if (k === 't') { ev.preventDefault(); selectTab(newTab().id); focusUrl(); }
     else if (k === 'w') { ev.preventDefault(); closeTab(t.id); }
-    else if (k === 'l') { ev.preventDefault(); ui.webContents.focus(); ui.webContents.send('focus-url'); }
+    else if (k === 'l') { ev.preventDefault(); focusUrl(); }
   });
   layout();
   selectTab(t.id);

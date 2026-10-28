@@ -40,6 +40,8 @@
   });
   $('url').addEventListener('focus', () => $('url').select());
   window.addEventListener('keydown', e => {
+    if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key === 'r')) { e.preventDefault(); api.cmd('reload'); return; }
+    if (e.key === 'F6') { e.preventDefault(); $('url').focus(); return; }
     if (!(e.ctrlKey || e.metaKey)) return;
     if (e.key === 'l') { e.preventDefault(); $('url').focus(); }
     if (e.key === 't') { e.preventDefault(); api.cmd('newtab'); }
@@ -52,6 +54,8 @@
     for (const t of st.tabs) {
       const d = document.createElement('div'); d.className = 'tab' + (t.active ? ' active' : '');
       d.onclick = () => api.cmd('select', t.id);
+      d.onmousedown = e => { if (e.button === 1) e.preventDefault(); };
+      d.onauxclick = e => { if (e.button === 1) { e.preventDefault(); api.cmd('close', t.id); } };
       const s = document.createElement('span'); s.textContent = (t.loading ? '… ' : '') + t.title; d.append(s);
       const x = document.createElement('button'); x.textContent = '✕'; x.onclick = e => { e.stopPropagation(); api.cmd('close', t.id); }; d.append(x);
       tabs.append(d);
