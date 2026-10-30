@@ -1,6 +1,6 @@
 # LLM Browser
 
-Navegador Electron (Windows/Linux) que un LLM puede ver y controlar vía MCP.
+Navegador Electron (Windows/Linux/macOS) que un LLM puede ver y controlar vía MCP.
 
 - `npm start` abre el navegador (pestañas, URL, sesión persistente).
 - `src/mcp.js` es el servidor MCP (stdio). Si el navegador no está abierto, lo lanza solo.
@@ -13,16 +13,33 @@ Acciones: `navigate`, `back`, `forward`, `reload`, `new_tab`, `close_tab`, `clic
 Los `ref` solo valen hasta la siguiente llamada a `read_page`.
 El ratón del modelo es virtual: se ve como un círculo rojo en la página (se desvanece a los 6 s sin uso). `click`, `mouse_move`, `drag` y `wheel` lo mueven y generan eventos de ratón reales; las coordenadas son píxeles de la captura.
 
-## Registrar
-Claude Code: `claude mcp add llm-browser -- node /ruta/a/llm-browser/src/mcp.js`
+## Instalar
+Descarga el instalador de la [última versión](https://github.com/tinaut1986/llm-browser/releases/latest):
+Windows `.exe`, Linux `.AppImage` o `.deb`, macOS `.dmg` (sin firmar y sin probar: Gatekeeper pide abrirla desde Ajustes → Privacidad y seguridad).
+
+La app se actualiza sola desde las releases de GitHub en Windows y en el AppImage de Linux (avisa y pide reiniciar). En macOS y con el `.deb` solo avisa de que hay versión nueva y abre su página.
+Las betas (releases marcadas como pre-release) solo se ofrecen si la app instalada es una beta o si `~/.llm-browser/settings.json` tiene `"betas": true`.
+
+## Registrar el MCP
+Instalada: la app escribe en `~/.llm-browser/mcp.json` el comando exacto para su ruta de instalación (usa el propio ejecutable como Node con `ELECTRON_RUN_AS_NODE=1`). Copia ese bloque `mcpServers` en la configuración del cliente.
+
+Desde el código: `claude mcp add llm-browser -- node /ruta/a/llm-browser/src/mcp.js`
 
 Antigravity (mcp_config.json):
 ```json
 { "mcpServers": { "llm-browser": { "command": "node", "args": ["/ruta/a/llm-browser/src/mcp.js"] } } }
 ```
 
-## Empaquetar
-`npm run dist` (AppImage en Linux, portable en Windows; hay que ejecutarlo en cada SO).
+## Empaquetar y publicar
+`npm run dist` genera los instaladores del SO actual en `dist/` (hay que ejecutarlo en cada SO; el CI lo hace en los tres).
+
+Mismo esquema que los ports de 3DS: `main` = estable, `release/vX.Y.Z` = línea de release actual (beta), ramas `feat/…`/`fix/…` desde ella con `--no-ff`. La versión es la del tag `vX.Y.Z` (el `package.json` no se toca: el CI la inyecta). Al subir un tag, `.github/workflows/build-release.yml` construye Windows, Linux y macOS y publica la release; es **Beta** (pre-release) si `main` no alcanza el commit y **Release** si sí.
+
+1. Escribir `docs/release-notes/vX.Y.Z.md` en una rama y fusionarla en la rama de release.
+2. Beta: `git tag -a vX.Y.Z -m vX.Y.Z && git push origin release/vX.Y.Z vX.Y.Z`.
+3. Estable: fusionar la rama en `main` con `--no-ff`, etiquetar el merge y subir `main` **antes** que el tag.
+
+El icono sale de `scripts/make-icon.py` (`npm run icon`, necesita Pillow).
 
 ## Bitwarden
 Botón 🔑 de la barra (o Ctrl+Mayús+L): rellena usuario y contraseña de la página desde la bóveda, o el código 2FA en el campo con foco. Usa la CLI `bw` (la app de escritorio no sirve): `npm i -g @bitwarden/cli` o `sudo snap install bw`, y `bw login` una vez en una terminal. Si está en otra ruta: `BW_PATH=/ruta/bw npm start`. Sin la CLI el navegador funciona igual y el botón explica cómo instalarla.

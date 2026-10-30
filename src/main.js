@@ -9,12 +9,18 @@ const cursorScript = require('./cursor');
 const ENGINES = require('./engines');
 const Bitwarden = require('./bitwarden');
 const { fillLogin, typeFocused } = require('./autofill');
+const startUpdater = require('./updater');
 
 const TOP = 84; // alto de la barra de UI
 const CONFIG_DIR = path.join(os.homedir(), '.llm-browser');
 const PARTITION = 'persist:llmbrowser';
 
-if (!app.requestSingleInstanceLock()) app.quit();
+// Una segunda instancia debe salir sin tocar nada (api.json es de la primera) y traer la ventana al frente.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) app.exit(0);
+app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
+// AppImage no trae chrome-sandbox con setuid: sin esto no arranca en muchas distros.
+if (process.platform === 'linux' && process.env.APPIMAGE) app.commandLine.appendSwitch('no-sandbox');
 
 let win, ui;
 let tabs = [];
@@ -23,19 +29,20 @@ let nextId = 1;
 let actEnabled = true;
 
 const SETTINGS_FILE = path.join(CONFIG_DIR, 'settings.json');
-let engine = 'duckduckgo';
-try {
-  const saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')).engine;
-  if (ENGINES[saved]) engine = saved;
-} catch {}
+let settings = {};
+try { settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); } catch {}
+const saveSettings = () => {
+  try {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings));
+  } catch {}
+};
+let engine = ENGINES[settings.engine] ? settings.engine : 'duckduckgo';
 const homeUrl = () => ENGINES[engine].home;
 function setEngine(id) {
   if (!ENGINES[id]) return;
-  engine = id;
-  try {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ engine }));
-  } catch {}
+  engine = settings.engine = id;
+  saveSettings();
   pushState();
 }
 
@@ -253,8 +260,19 @@ function startApi() {
   app.on('quit', () => { try { fs.unlinkSync(path.join(CONFIG_DIR, 'api.json')); } catch {} });
 }
 
+// Comando listo para registrar el MCP con la app instalada (la ruta depende de dónde esté instalada).
+function writeMcpSnippet() {
+  if (!app.isPackaged) return;
+  const cmd = { command: process.execPath, args: [path.join(process.resourcesPath, 'app.asar', 'src', 'mcp.js')], env: { ELECTRON_RUN_AS_NODE: '1' } };
+  try {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(path.join(CONFIG_DIR, 'mcp.json'), JSON.stringify({ mcpServers: { 'llm-browser': cmd } }, null, 2));
+  } catch {}
+}
+
 app.whenReady().then(() => {
-  win = new BrowserWindow({ width: 1280, height: 860, title: 'LLM Browser', backgroundColor: '#1e1f24' });
+  if (!gotLock) return;
+  win = new BrowserWindow({ width: 1280, height: 860, title: 'LLM Browser', backgroundColor: '#1e1f24', icon: path.join(__dirname, '..', 'build', 'icon.png') });
   win.removeMenu();
   ui = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true } });
   win.contentView.addChildView(ui);
@@ -283,6 +301,9 @@ app.whenReady().then(() => {
   newTab(homeUrl());
   startApi();
   layout();
+  writeMcpSnippet();
+  // La versión se hornea con el canal: una beta instalada sigue ofreciendo betas (como los ports de 3DS).
+  startUpdater({ betas: settings.betas ?? require('../package.json').channel === 'beta', parent: () => win });
 });
 
 app.on('window-all-closed', () => app.quit());
