@@ -1,0 +1,160 @@
+name: Build and release
+
+# Same release scheme as the 3DS ports (../CTR-3D, ../sm-3ds; see CLAUDE.md "Releases"):
+# a vX.Y.Z tag builds the installers and publishes a GitHub Release, which is also what
+# the app's updater reads. Only three-component tags are ours.
+# The channel depends on whether main can reach the tagged commit:
+#   tag on an unmerged release/* branch  -> Beta (pre-release)
+#   tag on main, or merged into main     -> Release
+#   manual run on a branch               -> build only, nothing is published
+# The version and the channel are baked into the build (package.json extraMetadata).
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  vars:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+      channel: ${{ steps.v.outputs.channel }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: v
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/*)
+              TAG="${GITHUB_REF#refs/tags/}"
+              VERSION="${TAG#v}"
+              PUBLISH=true
+              ;;
+            *)
+              # Manual run on a branch: a dev build, kept as a workflow artifact only.
+              TAG=
+              VERSION="$(node -p "require('./package.json').version")-dev.${GITHUB_RUN_NUMBER}"
+              PUBLISH=false
+              ;;
+          esac
+          git fetch --no-tags --quiet origin +refs/heads/main:refs/remotes/origin/main || true
+          if [ "$PUBLISH" = true ] && git merge-base --is-ancestor HEAD refs/remotes/origin/main 2>/dev/null; then
+            CHANNEL=release; PRERELEASE=false
+          else
+            CHANNEL=beta; PRERELEASE=true
+          fi
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "channel=$CHANNEL"
+            echo "prerelease=$PRERELEASE"
+            echo "publish=$PUBLISH"
+          } >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG version=$VERSION channel=$CHANNEL publish=$PUBLISH"
+
+  build:
+    needs: vars
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+          - os: ubuntu-latest
+            name: linux
+          - os: macos-latest
+            name: mac
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build installers
+        shell: bash
+        run: |
+          npx electron-builder --publish never \
+            -c.extraMetadata.version="${{ needs.vars.outputs.version }}" \
+            -c.extraMetadata.channel="${{ needs.vars.outputs.channel }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.dmg
+            dist/*.zip
+            dist/*.blockmap
+            dist/latest*.yml
+
+  release:
+    needs: [vars, build]
+    if: needs.vars.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: dist-*
+          merge-multiple: true
+      - name: Release notes
+        run: |
+          TAG="${{ needs.vars.outputs.tag }}"
+          V="${{ needs.vars.outputs.version }}"
+          BASE="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+          PREV=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' "HEAD^" 2>/dev/null || true)
+          RANGE="${PREV:+${PREV}..}HEAD"
+          [ -f "docs/release-notes/${TAG}.md" ] || echo "::warning::docs/release-notes/${TAG}.md is missing"
+          {
+            if [ "${{ needs.vars.outputs.prerelease }}" = true ]; then
+              echo "> **Beta build.** It comes off a \`release/*\` branch that has not been"
+              echo "> merged into \`main\` yet, so it is not a stable version."
+              echo
+            fi
+            if [ -f "docs/release-notes/${TAG}.md" ]; then
+              echo "<!-- llmb-notes -->"
+              echo "## What's new"
+              echo
+              cat "docs/release-notes/${TAG}.md"
+              echo
+              echo "<!-- /llmb-notes -->"
+              echo
+            fi
+            echo "## Downloads"
+            echo
+            echo "- Windows: [LLM-Browser-${V}-win-x64.exe](${BASE}/LLM-Browser-${V}-win-x64.exe)"
+            echo "- Linux: [LLM-Browser-${V}-linux-x86_64.AppImage](${BASE}/LLM-Browser-${V}-linux-x86_64.AppImage) or [.deb](${BASE}/LLM-Browser-${V}-linux-amd64.deb)"
+            echo "- macOS (unsigned, untested): [Apple Silicon](${BASE}/LLM-Browser-${V}-mac-arm64.dmg), [Intel](${BASE}/LLM-Browser-${V}-mac-x64.dmg)"
+            echo
+            echo "Windows and the Linux AppImage update themselves from these releases. macOS and the .deb only tell you a new version exists."
+            echo
+            echo "## Changelog"
+            echo
+            git log ${RANGE} --no-merges --pretty='- %s (%h)'
+          } > release_notes.md
+          ls -R dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.vars.outputs.tag }}
+          name: ${{ needs.vars.outputs.prerelease == 'true' && 'Beta' || 'Release' }} ${{ needs.vars.outputs.tag }}
+          prerelease: ${{ needs.vars.outputs.prerelease == 'true' }}
+          # /releases/latest must be the stable one
+          make_latest: ${{ needs.vars.outputs.prerelease == 'true' && 'false' || 'true' }}
+          body_path: release_notes.md
+          files: dist/*
