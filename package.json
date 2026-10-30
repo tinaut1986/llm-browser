@@ -9,33 +9,77 @@
   "scripts": {
     "start": "electron .",
     "mcp": "node src/mcp.js",
-    "dist": "electron-builder"
+    "dist": "electron-builder --publish never",
+    "icon": "python3 scripts/make-icon.py"
   },
   "build": {
-    "appId": "local.llmbrowser",
+    "appId": "com.tinaut1986.llmbrowser",
     "productName": "LLM Browser",
+    "artifactName": "LLM-Browser-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "buildResources": "build"
+    },
     "files": [
       "src/**",
+      "build/icon.png",
+      "userscripts/**",
       "package.json"
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "tinaut1986",
+      "repo": "llm-browser"
+    },
     "linux": {
       "target": [
-        "AppImage"
+        "AppImage",
+        "deb"
       ],
-      "category": "Network"
+      "category": "Network",
+      "icon": "icon.png",
+      "maintainer": "tinaut1986"
     },
     "win": {
       "target": [
-        "portable"
-      ]
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "icon.icns",
+      "identity": "-",
+      "hardenedRuntime": false
     }
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "electron": "^45.0.0",
+    "electron-updater": "^6.8.11",
+    "semver": "^7.8.5",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "electron": "^45.0.0",
     "electron-builder": "^26.18.0"
+  },
+  "author": "tinaut1986",
+  "homepage": "https://github.com/tinaut1986/llm-browser",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tinaut1986/llm-browser.git"
   }
 }

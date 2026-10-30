@@ -25,8 +25,15 @@ async function post(cfg, tool, args) {
 async function ensureRunning() {
   let cfg = readCfg();
   if (cfg) { try { await post(cfg, 'tabs', {}); return cfg; } catch {} }
-  const electron = require('electron'); // ruta al binario
-  const child = spawn(electron, [path.join(__dirname, '..'), ...(process.platform === 'linux' ? ['--no-sandbox'] : [])], { detached: true, stdio: 'ignore' });
+  // Instalada, este script corre con el propio ejecutable como Node (ELECTRON_RUN_AS_NODE) y el
+  // navegador es ese mismo ejecutable sin la variable. En desarrollo, el binario de node_modules.
+  const env = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const [cmd, args] = process.versions.electron
+    ? [process.execPath, []]
+    : [require('electron'), [path.join(__dirname, '..')]];
+  if (process.platform === 'linux') args.push('--no-sandbox');
+  const child = spawn(cmd, args, { detached: true, stdio: 'ignore', env });
   child.unref();
   for (let i = 0; i < 60; i++) {
     await sleep(500);
@@ -48,7 +55,7 @@ async function run(tool, args) {
   }
 }
 
-const server = new McpServer({ name: 'llm-browser', version: '0.1.0' });
+const server = new McpServer({ name: 'llm-browser', version: require('../package.json').version });
 const def = (name, description, shape = {}) => server.tool(name, description, shape, args => run(name, args));
 
 def('read_page', 'Devuelve el contenido visible de la pestaña activa como texto; los elementos interactivos llevan un [ref] que se usa en click/type/scroll/select_option. Úsalo antes de interactuar.', { viewport_only: z.boolean().optional().describe('Solo lo visible en pantalla') });
