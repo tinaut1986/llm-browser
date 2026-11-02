@@ -19,7 +19,7 @@ Descarga el instalador de la [última versión](https://github.com/tinaut1986/ll
 Windows `.exe`, Linux `.AppImage` o `.deb`, macOS `.dmg` (sin firmar y sin probar: Gatekeeper pide abrirla desde Ajustes → Privacidad y seguridad).
 
 La app se actualiza sola desde las releases de GitHub en Windows y en el AppImage de Linux (avisa y pide reiniciar). En macOS y con el `.deb` solo avisa de que hay versión nueva y abre su página.
-Las betas (releases marcadas como pre-release) solo se ofrecen si la app instalada es una beta o si `~/.llm-browser/settings.json` tiene `"betas": true`.
+El canal de actualizaciones (estable o beta) se elige en el menú Ajustes, junto con «Buscar actualizaciones ahora»; se guarda en `~/.llm-browser/settings.json` (`"betas"`). Sin elegir, una beta instalada sigue en el canal beta y una estable en el estable.
 
 ## Registrar el MCP
 Instalada: la app escribe en `~/.llm-browser/mcp.json` el comando exacto para su ruta de instalación (usa el propio ejecutable como Node con `ELECTRON_RUN_AS_NODE=1`). Copia ese bloque `mcpServers` en la configuración del cliente.
