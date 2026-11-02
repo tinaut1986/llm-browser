@@ -1,0 +1,163 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Gestión de marcadores</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #1e1f24; color: #e6e6e6; font: 13px system-ui, sans-serif; user-select: none; overflow: hidden; }
+  body { display: flex; flex-direction: column; }
+  #tools { display: flex; gap: 6px; padding: 8px; background: #2a2c33; }
+  button { all: unset; cursor: pointer; padding: 5px 10px; border-radius: 6px; background: #3a3d46; }
+  button:hover:not(:disabled) { background: #4a4e59; }
+  button:disabled { opacity: .35; cursor: default; }
+  #main { flex: 1; display: flex; min-height: 0; }
+  #tree { flex: 1; overflow: auto; padding: 6px 0; }
+  .row { display: flex; align-items: center; gap: 6px; height: 28px; padding-right: 10px; cursor: default; white-space: nowrap; }
+  .row:hover { background: #2a2c33; }
+  .row.sel { background: #3d5a8a; }
+  .row.drop-in { background: #2f4a73; outline: 1px solid #6ea8ff; outline-offset: -1px; }
+  .row.drop-before { box-shadow: inset 0 2px 0 #6ea8ff; }
+  .row.drop-after { box-shadow: inset 0 -2px 0 #6ea8ff; }
+  #tree.drop-end { box-shadow: inset 0 -3px 0 #6ea8ff; }
+  .caret { width: 14px; text-align: center; opacity: .7; cursor: pointer; }
+  .title { overflow: hidden; text-overflow: ellipsis; }
+  .url { flex: 1; overflow: hidden; text-overflow: ellipsis; opacity: .5; font-size: 12px; }
+  .empty { padding: 20px; opacity: .5; }
+  #form { width: 270px; padding: 12px; border-left: 1px solid #3a3d46; display: flex; flex-direction: column; gap: 6px; }
+  #form.off { opacity: .35; pointer-events: none; }
+  label { font-size: 12px; opacity: .7; margin-top: 6px; }
+  input { height: 30px; padding: 0 10px; border-radius: 6px; border: 0; background: #2a2c33; color: inherit; font: inherit; user-select: text; outline: none; }
+  input:focus { box-shadow: 0 0 0 2px #6ea8ff; }
+  #urlrow.hidden, #open.hidden { display: none; }
+  #open { align-self: flex-start; margin-top: 8px; }
+  #hint { padding: 6px 12px; font-size: 12px; opacity: .5; background: #2a2c33; }
+</style>
+<div id="tools">
+  <button id="nf">📁 Nueva carpeta</button>
+  <button id="nb">🔖 Nuevo marcador</button>
+  <button id="del">🗑 Eliminar</button>
+</div>
+<div id="main">
+  <div id="tree"></div>
+  <div id="form" class="off">
+    <label for="name">Nombre</label>
+    <input id="name" spellcheck="false">
+    <div id="urlrow"><label for="url">Dirección</label><input id="url" spellcheck="false" style="width:100%"></div>
+    <button id="open">Abrir en una pestaña nueva</button>
+  </div>
+</div>
+<div id="hint">Arrastra para reordenar o mover a una carpeta · doble clic para abrir · Supr para eliminar</div>
+<script>
+  const $ = id => document.getElementById(id);
+  const MIME = 'application/x-llmb-bookmark';
+  let tree = [], selected = null, focusName = false, loaded = false;
+  const collapsed = new Set();
+
+  const find = (list, id) => { for (const n of list) { if (n.id === id) return n; const r = n.children && find(n.children, id); if (r) return r; } return null; };
+  const locate = (list, id, parentId = null) => {
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].id === id) return { parentId, index: i };
+      const r = list[i].type === 'folder' && locate(list[i].children, id, list[i].id);
+      if (r) return r;
+    }
+    return null;
+  };
+  // Where the selection goes after the current one is added: next to it, or inside it when it is a folder.
+  const insertionPoint = () => {
+    const n = selected && find(tree, selected);
+    if (!n) return { parentId: null };
+    if (n.type === 'folder') return { parentId: n.id };
+    const l = locate(tree, n.id);
+    return { parentId: l.parentId, index: l.index + 1 };
+  };
+
+  function select(id, focus = false) { selected = id; focusName = focus; render(); }
+
+  function render() {
+    if (loaded && selected && !find(tree, selected)) selected = null; // a select() can arrive before the first list
+    const el = $('tree'); el.textContent = '';
+    const walk = (list, depth) => {
+      for (const n of list) {
+        const r = document.createElement('div');
+        r.className = 'row' + (n.id === selected ? ' sel' : ''); r.draggable = true; r.dataset.id = n.id; r.dataset.type = n.type;
+        r.style.paddingLeft = 8 + depth * 20 + 'px';
+        const caret = document.createElement('span'); caret.className = 'caret';
+        if (n.type === 'folder') {
+          caret.textContent = collapsed.has(n.id) ? '▸' : '▾';
+          caret.onclick = e => { e.stopPropagation(); collapsed.has(n.id) ? collapsed.delete(n.id) : collapsed.add(n.id); render(); };
+        }
+        const title = document.createElement('span'); title.className = 'title'; title.textContent = (n.type === 'folder' ? '📁 ' : '🔖 ') + n.title;
+        r.append(caret, title);
+        if (n.type === 'bookmark') { const u = document.createElement('span'); u.className = 'url'; u.textContent = n.url; r.append(u); }
+        r.onclick = () => select(n.id);
+        r.ondblclick = () => { if (n.type === 'bookmark') api.bm({ op: 'open', id: n.id, newTab: true }); else { collapsed.has(n.id) ? collapsed.delete(n.id) : collapsed.add(n.id); render(); } };
+        r.ondragstart = e => e.dataTransfer.setData(MIME, n.id);
+        el.append(r);
+        if (n.type === 'folder' && !collapsed.has(n.id)) walk(n.children, depth + 1);
+      }
+    };
+    walk(tree, 0);
+    if (!tree.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = 'Todavía no hay marcadores. Añade uno con ☆ o arrastrando 🌐 a la barra.'; el.append(e); }
+    fillForm();
+  }
+
+  function fillForm() {
+    const n = selected && find(tree, selected);
+    $('form').classList.toggle('off', !n);
+    $('del').disabled = !n;
+    $('urlrow').classList.toggle('hidden', !n || n.type !== 'bookmark');
+    $('open').classList.toggle('hidden', !n || n.type !== 'bookmark');
+    if (!n) { $('name').value = ''; $('url').value = ''; return; }
+    if (document.activeElement !== $('name')) $('name').value = n.title;
+    if (document.activeElement !== $('url')) $('url').value = n.url || '';
+    if (focusName) { focusName = false; $('name').focus(); $('name').select(); }
+  }
+
+  const commit = () => { if (selected) api.bm({ op: 'update', id: selected, title: $('name').value, url: $('url').value }); };
+  $('name').addEventListener('change', commit);
+  $('url').addEventListener('change', commit);
+  for (const i of [$('name'), $('url')]) i.addEventListener('keydown', e => { if (e.key === 'Enter') i.blur(); });
+  $('open').onclick = () => selected && api.bm({ op: 'open', id: selected, newTab: true });
+  $('nf').onclick = async () => { const p = insertionPoint(); select(await api.bm({ op: 'addFolder', title: 'Carpeta nueva', ...p }), true); };
+  $('nb').onclick = async () => { const p = insertionPoint(); select(await api.bm({ op: 'add', title: 'Nuevo marcador', url: 'https://example.com', ...p }), true); };
+
+  function removeSelected() {
+    const n = selected && find(tree, selected);
+    if (!n) return;
+    if (n.type === 'folder' && n.children.length && !confirm('¿Eliminar la carpeta «' + n.title + '» y todo lo que contiene?')) return;
+    api.bm({ op: 'remove', id: n.id });
+  }
+  $('del').onclick = removeSelected;
+  window.addEventListener('keydown', e => {
+    if (e.key === 'Delete' && !(e.target instanceof HTMLInputElement)) removeSelected();
+    if (e.key === 'Escape' && document.activeElement instanceof HTMLInputElement) { fillForm(); document.activeElement.blur(); }
+  });
+
+  // ---- Drag and drop: onto a folder (middle of its row) moves inside it; elsewhere before/after the row ----
+  const treeEl = $('tree');
+  const clearDrop = () => { treeEl.classList.remove('drop-end'); for (const r of treeEl.querySelectorAll('.row')) r.classList.remove('drop-in', 'drop-before', 'drop-after'); };
+  function dropTarget(e) {
+    const row = e.target.closest('.row');
+    if (!row) return { mode: 'end', parentId: null, index: null };
+    const b = row.getBoundingClientRect(), y = (e.clientY - b.top) / b.height;
+    if (row.dataset.type === 'folder' && y > .25 && y < .75) return { row, mode: 'in', parentId: row.dataset.id, index: null };
+    const l = locate(tree, row.dataset.id);
+    return y < .5 ? { row, mode: 'before', parentId: l.parentId, index: l.index } : { row, mode: 'after', parentId: l.parentId, index: l.index + 1 };
+  }
+  treeEl.addEventListener('dragover', e => {
+    e.preventDefault();
+    const t = dropTarget(e);
+    clearDrop();
+    if (t.row) t.row.classList.add('drop-' + t.mode); else treeEl.classList.add('drop-end');
+  });
+  treeEl.addEventListener('dragleave', e => { if (!treeEl.contains(e.relatedTarget)) clearDrop(); });
+  treeEl.addEventListener('drop', e => {
+    e.preventDefault();
+    const t = dropTarget(e), id = e.dataTransfer.getData(MIME);
+    clearDrop();
+    if (id) { if (t.mode === 'in') collapsed.delete(t.parentId); api.bm({ op: 'move', id, parentId: t.parentId, index: t.index }); }
+  });
+
+  api.onState(t => { tree = t; loaded = true; render(); });
+  api.onSelect(id => select(id, true));
+  api.bm({ op: 'list' }).then(t => { tree = t; loaded = true; render(); });
+</script>

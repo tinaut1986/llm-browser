@@ -25,6 +25,13 @@ module.exports = function menuTemplate(h) {
       { label: 'Pantalla completa', accelerator: 'F11', click: h.fullscreen },
       { label: 'Herramientas de desarrollo', accelerator: 'F12', click: h.devtools },
     ] },
+    { label: 'Marcadores', submenu: [
+      shown(h.isBookmarked() ? 'Quitar esta página de marcadores' : 'Añadir esta página a marcadores', 'CmdOrCtrl+D', h.toggleBookmark),
+      shown('Mostrar barra de marcadores', 'CmdOrCtrl+Shift+B', h.toggleBar, { type: 'checkbox', checked: h.barShown() }),
+      shown('Gestionar marcadores', 'CmdOrCtrl+Shift+O', h.manageBookmarks),
+      { type: 'separator' },
+      ...h.bookmarkItems(),
+    ] },
     { label: 'Herramientas', submenu: [
       { label: 'El modelo puede actuar', type: 'checkbox', checked: h.act(), click: i => h.setAct(i.checked) },
       shown('Rellenar con Bitwarden', 'CmdOrCtrl+Shift+L', h.bitwarden),

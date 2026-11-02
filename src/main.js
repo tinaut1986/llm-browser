@@ -11,6 +11,7 @@ const Bitwarden = require('./bitwarden');
 const { fillLogin, typeFocused } = require('./autofill');
 const startUpdater = require('./updater');
 const menuTemplate = require('./menu');
+const Bookmarks = require('./bookmarks');
 
 const TOP = 84; // alto de la barra de UI
 const CONFIG_DIR = path.join(os.homedir(), '.llm-browser');
@@ -54,6 +55,131 @@ function setEngine(id) {
 
 const activeTab = () => tabs.find(t => t.id === activeId);
 
+// ---- Bookmarks: tree in settings.bookmarks, bar under the address bar, manager window ----
+settings.bookmarks = Bookmarks.normalize(settings.bookmarks);
+const BAR_H = 30;
+const barShown = () => settings.bookmarksBar !== false;
+const uiHeight = () => TOP + (barShown() ? BAR_H : 0);
+const isBookmarked = url => Bookmarks.hasUrl(settings.bookmarks, url);
+let manager = null;
+
+function pushManager() {
+  if (manager && !manager.isDestroyed()) manager.webContents.send('bm-state', settings.bookmarks);
+}
+
+function bookmarksChanged() {
+  saveSettings();
+  pushState();
+  pushManager();
+  refreshMenu();
+}
+
+function toggleBar() {
+  settings.bookmarksBar = !barShown();
+  saveSettings();
+  layout();
+  pushState();
+  refreshMenu();
+}
+
+function toggleBookmark() {
+  const t = activeTab();
+  if (!t || !/^https?:\/\//i.test(t.url)) return;
+  if (!Bookmarks.removeByUrl(settings.bookmarks, t.url)) Bookmarks.addBookmark(settings.bookmarks, { title: t.title, url: t.url });
+  bookmarksChanged();
+}
+
+function openManager(selectId) {
+  if (manager && !manager.isDestroyed()) {
+    manager.focus();
+    if (selectId) manager.webContents.send('bm-select', selectId);
+    return;
+  }
+  manager = new BrowserWindow({ parent: win, width: 820, height: 560, minWidth: 560, minHeight: 360, title: 'Gestión de marcadores', backgroundColor: '#1e1f24',
+    webPreferences: { preload: path.join(__dirname, 'bm-preload.js'), contextIsolation: true, sandbox: true } });
+  manager.removeMenu();
+  manager.loadFile(path.join(__dirname, 'bookmarks.html'));
+  if (selectId) manager.webContents.once('did-finish-load', () => manager.webContents.send('bm-select', selectId));
+  manager.on('closed', () => { manager = null; });
+}
+
+const openBookmark = (url, inNewTab) => (inNewTab ? newTab(url) : call('navigate', { url }, { user: true }).catch(() => {}));
+const menuLabel = s => (s.length > 60 ? s.slice(0, 57) + '…' : s).replace(/&/g, '&&');
+
+function folderItems(folder) {
+  const urls = Bookmarks.urls(folder);
+  return [...bookmarkItems(folder.children), ...(urls.length ? [{ type: 'separator' }, { label: 'Abrir todos en pestañas', click: () => urls.forEach(u => newTab(u)) }] : [])];
+}
+
+function bookmarkItems(nodes) {
+  if (!nodes.length) return [{ label: '(vacía)', enabled: false }];
+  return nodes.map(n => (n.type === 'folder'
+    ? { label: menuLabel(n.title), submenu: folderItems(n) }
+    : { label: menuLabel(n.title), toolTip: n.url, click: () => openBookmark(n.url) }));
+}
+
+function newFolder(parentId = null) {
+  const folder = Bookmarks.addFolder(settings.bookmarks, 'Carpeta nueva', parentId);
+  bookmarksChanged();
+  openManager(folder.id); // the manager opens with the name selected so it can be typed right away
+}
+
+function bookmarkContextMenu(id) {
+  const node = id ? Bookmarks.find(settings.bookmarks, id)?.node : null;
+  const m = [];
+  if (node?.type === 'bookmark') m.push({ label: 'Abrir', click: () => openBookmark(node.url) }, { label: 'Abrir en pestaña nueva', click: () => openBookmark(node.url, true) });
+  if (node?.type === 'folder') m.push({ label: 'Abrir todos en pestañas', enabled: Bookmarks.urls(node).length > 0, click: () => Bookmarks.urls(node).forEach(u => newTab(u)) });
+  if (node) m.push(
+    { label: 'Editar…', click: () => openManager(node.id) },
+    { label: 'Eliminar', click: () => { Bookmarks.remove(settings.bookmarks, node.id); bookmarksChanged(); } },
+    { type: 'separator' });
+  m.push({ label: 'Nueva carpeta', click: () => newFolder() }, { label: 'Gestionar marcadores', click: () => openManager() }, { label: 'Ocultar barra de marcadores', click: toggleBar });
+  Menu.buildFromTemplate(m).popup({ window: win });
+}
+
+// Typed addresses get https:// when they have no scheme; only http(s) bookmarks are accepted.
+const bookmarkUrl = u => {
+  const s = String(u ?? '').trim();
+  const full = /^[a-z][a-z0-9+.-]*:/i.test(s) ? s : 'https://' + s;
+  return /^https?:\/\/./i.test(full) ? full : null;
+};
+
+// Everything the bar, the manager and the menus can ask for. Invalid requests (a folder dropped into itself...) are ignored.
+function bookmarkOp(a) {
+  const tree = settings.bookmarks;
+  const parentId = a.parentId ?? null;
+  let id;
+  try {
+    switch (a.op) {
+      case 'list': return tree;
+      case 'manager': return openManager(a.id);
+      case 'toggleBar': return toggleBar();
+      case 'ctx': return bookmarkContextMenu(a.id);
+      case 'newFolder': return newFolder(parentId);
+      case 'open': { const n = Bookmarks.find(tree, a.id)?.node; if (n?.type === 'bookmark') openBookmark(n.url, a.newTab); return; }
+      case 'folderMenu': {
+        const n = Bookmarks.find(tree, a.id)?.node;
+        if (n?.type === 'folder') Menu.buildFromTemplate(folderItems(n)).popup({ window: win, x: a.x, y: a.y });
+        return;
+      }
+      case 'add': {
+        const url = bookmarkUrl(a.url ?? 'https://example.com');
+        if (!url) return;
+        const title = String(a.title || '') || tabs.find(t => t.url === url)?.title || url;
+        id = Bookmarks.addBookmark(tree, { title, url }, parentId, a.index ?? undefined).id;
+        break;
+      }
+      case 'addFolder': id = Bookmarks.addFolder(tree, String(a.title || ''), parentId, a.index ?? undefined).id; break;
+      case 'update': Bookmarks.update(tree, a.id, { title: a.title, url: a.url == null ? undefined : bookmarkUrl(a.url) ?? undefined }); break;
+      case 'remove': Bookmarks.remove(tree, a.id); break;
+      case 'move': Bookmarks.move(tree, a.id, parentId, a.index ?? undefined); break;
+      default: return;
+    }
+  } catch { return; }
+  bookmarksChanged();
+  return id;
+}
+
 function focusUrl() {
   ui.webContents.focus();
   ui.webContents.send('focus-url');
@@ -65,6 +191,9 @@ function pushState() {
   ui.webContents.send('state', {
     tabs: tabs.map(x => ({ id: x.id, title: x.title || x.url || 'Nueva pestaña', url: x.url, active: x.id === activeId, loading: x.loading })),
     act: actEnabled,
+    bookmarked: !!t && isBookmarked(t.url),
+    bookmarks: settings.bookmarks,
+    bookmarksBar: barShown(),
     engine,
     engines: Object.entries(ENGINES).map(([id, e]) => ({ id, name: e.name })),
     canBack: !!t && t.view.webContents.navigationHistory.canGoBack(),
@@ -75,8 +204,8 @@ function pushState() {
 function layout() {
   if (!win) return;
   const { width, height } = win.getContentBounds();
-  ui.setBounds({ x: 0, y: 0, width, height: TOP });
-  for (const t of tabs) t.view.setBounds({ x: 0, y: TOP, width, height: Math.max(0, height - TOP) });
+  ui.setBounds({ x: 0, y: 0, width, height: uiHeight() });
+  for (const t of tabs) t.view.setBounds({ x: 0, y: uiHeight(), width, height: Math.max(0, height - uiHeight()) });
 }
 
 function newTab(url = 'about:blank') {
@@ -128,6 +257,9 @@ function newTab(url = 'about:blank') {
       return;
     }
     if (mod && input.shift && k === 'l') { ev.preventDefault(); bitwardenFlow(); return; }
+    if (mod && !input.shift && k === 'd') { ev.preventDefault(); toggleBookmark(); return; }
+    if (mod && input.shift && k === 'b') { ev.preventDefault(); toggleBar(); return; }
+    if (mod && input.shift && k === 'o') { ev.preventDefault(); openManager(); return; }
     if (k === 'f6') { ev.preventDefault(); focusUrl(); return; }
     if (!mod) return;
     if (k === 'tab') { ev.preventDefault(); cycleTab(input.shift ? -1 : 1); return; }
@@ -248,6 +380,12 @@ function refreshMenu() {
     newTab: () => { selectTab(newTab(homeUrl()).id); focusUrl(); },
     closeTab: () => closeTab(activeId),
     focusUrl,
+    isBookmarked: () => { const t = activeTab(); return !!t && isBookmarked(t.url); },
+    toggleBookmark,
+    barShown,
+    toggleBar,
+    manageBookmarks: () => openManager(),
+    bookmarkItems: () => bookmarkItems(settings.bookmarks),
     quit: () => app.quit(),
     reload: () => wc()?.reload(),
     hardReload: () => wc()?.reloadIgnoringCache(),
@@ -354,11 +492,15 @@ app.whenReady().then(() => {
       case 'reload': return w?.reload();
       case 'engine': return setEngine(arg);
       case 'bw': return bitwardenFlow();
+      case 'bookmark': return toggleBookmark();
+      case 'bm': return bookmarkOp(arg);
       case 'cycle': return cycleTab(arg);
       case 'act': return setAct(arg);
       case 'ready': return pushState();
     }
   });
+
+  ipcMain.handle('bm', (_e, a) => bookmarkOp(a));
 
   newTab(homeUrl());
   startApi();
