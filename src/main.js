@@ -19,8 +19,12 @@ const PARTITION = 'persist:llmbrowser';
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.exit(0);
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
-// AppImage no trae chrome-sandbox con setuid: sin esto no arranca en muchas distros.
-if (process.platform === 'linux' && process.env.APPIMAGE) app.commandLine.appendSwitch('no-sandbox');
+// AppImage no trae chrome-sandbox con setuid. Solo se desactiva el sandbox si el kernel tampoco permite el sandbox por user namespaces.
+function userNamespacesAvailable() {
+  const read = f => { try { return fs.readFileSync(f, 'utf8').trim(); } catch { return null; } };
+  return read('/proc/sys/kernel/unprivileged_userns_clone') !== '0' && read('/proc/sys/kernel/apparmor_restrict_unprivileged_userns') !== '1';
+}
+if (process.platform === 'linux' && process.env.APPIMAGE && !userNamespacesAvailable()) app.commandLine.appendSwitch('no-sandbox');
 
 let win, ui;
 let tabs = [];
@@ -80,7 +84,7 @@ function newTab(url = 'about:blank') {
   tabs.push(t);
   win.contentView.addChildView(view);
   w.on('page-title-updated', (_e, title) => { t.title = title; pushState(); });
-  w.on('did-navigate', (_e, u) => { t.url = u; pushState(); });
+  w.on('did-navigate', (_e, u) => { t.url = u; t.secrets = false; pushState(); });
   w.on('did-navigate-in-page', (_e, u) => { t.url = u; pushState(); });
   w.on('dom-ready', () => { if (t.cursor?.visible) w.executeJavaScript(cursorScript(t.cursor.x, t.cursor.y, 'move'), true).catch(() => {}); });
   w.on('did-start-loading', () => { t.loading = true; pushState(); });
@@ -90,7 +94,7 @@ function newTab(url = 'about:blank') {
     t.logs.push({ level: e.level ?? a[1], message: e.message ?? a[2] });
     if (t.logs.length > 500) t.logs.shift();
   });
-  w.setWindowOpenHandler(({ url: u }) => { newTab(u); return { action: 'deny' }; });
+  w.setWindowOpenHandler(({ url: u }) => { if (/^(https?|about):/i.test(u)) newTab(u); return { action: 'deny' }; });
   w.on('context-menu', (_e, p) => {
     const item = (label, click, enabled = true) => ({ label, click, enabled });
     const sep = { type: 'separator' };
@@ -191,11 +195,13 @@ async function bitwardenFlow() {
       label: i.username ? `${i.name} — ${i.username}` : i.name,
       click: () => run(async () => {
         const done = await fillLogin(w, await bw.credentials(i.id));
+        if (done.password) t.secrets = true;
         if (!done.username && !done.password) await note('No encuentro un formulario de login a la vista en esta página');
       }),
     }));
     for (const i of items.filter(x => x.hasTotp)) menu.push({ label: `Código 2FA: ${i.name}`, click: () => run(async () => {
-      if (!(await typeFocused(w, await bw.totp(i.id)))) await note('Haz clic primero en el campo del código y vuelve a pulsar 🔑');
+      if (await typeFocused(w, await bw.totp(i.id))) t.secrets = true;
+      else await note('Haz clic primero en el campo del código y vuelve a pulsar 🔑');
     }) });
     if (!menu.length) menu.push({ label: 'Sin cuentas para este sitio', enabled: false });
     menu.push({ type: 'separator' }, { label: 'Bloquear bóveda', click: () => bw.lock() });
@@ -286,7 +292,7 @@ app.whenReady().then(() => {
       case 'newtab': return selectTab(newTab(homeUrl()).id);
       case 'select': selectTab(arg); return activeTab().view.webContents.focus();
       case 'close': return closeTab(arg);
-      case 'nav': return call('navigate', { url: arg }).catch(() => {}) && undefined;
+      case 'nav': call('navigate', { url: arg }, { user: true }).catch(() => {}); return;
       case 'back': return w?.navigationHistory.goBack();
       case 'forward': return w?.navigationHistory.goForward();
       case 'reload': return w?.reload();

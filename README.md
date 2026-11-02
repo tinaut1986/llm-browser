@@ -11,6 +11,7 @@ Navegador Electron (Windows/Linux/macOS) que un LLM puede ver y controlar vía M
 Lectura: `read_page` (texto + `[ref]` interactivos), `get_text`, `screenshot`, `tabs`, `console_logs`, `select_tab`.
 Acciones: `navigate`, `back`, `forward`, `reload`, `new_tab`, `close_tab`, `click`, `mouse_move`, `drag`, `wheel`, `type`, `press_key`, `scroll`, `select_option`, `evaluate`.
 Los `ref` solo valen hasta la siguiente llamada a `read_page`.
+El modelo solo puede navegar a `http`, `https` y `about:` (no `file:`, `data:`, `javascript:`); la barra de URL del usuario no tiene esa limitación y funciona también en modo solo lectura.
 El ratón del modelo es virtual: se ve como un círculo rojo en la página (se desvanece a los 6 s sin uso). `click`, `mouse_move`, `drag` y `wheel` lo mueven y generan eventos de ratón reales; las coordenadas son píxeles de la captura.
 
 ## Instalar
@@ -43,4 +44,4 @@ El icono sale de `scripts/make-icon.py` (`npm run icon`, necesita Pillow).
 
 ## Bitwarden
 Botón 🔑 de la barra (o Ctrl+Mayús+L): rellena usuario y contraseña de la página desde la bóveda, o el código 2FA en el campo con foco. Usa la CLI `bw` (la app de escritorio no sirve): `npm i -g @bitwarden/cli` o `sudo snap install bw`, y `bw login` una vez en una terminal. Si está en otra ruta: `BW_PATH=/ruta/bw npm start`. Sin la CLI el navegador funciona igual y el botón explica cómo instalarla.
-La contraseña maestra se pide en una ventana propia y la clave de sesión solo vive en memoria. Lo dispara únicamente el usuario: el modelo no tiene herramienta para ello y nunca ve los secretos.
+La contraseña maestra se pide en una ventana propia y la clave de sesión solo vive en memoria. Lo dispara únicamente el usuario: el modelo no tiene herramienta para ello. `read_page` oculta los campos de contraseña y `evaluate` queda bloqueado en esa pestaña hasta la siguiente navegación, para que el modelo no pueda leer lo rellenado.
