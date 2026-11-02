@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, Menu, clipboard, dialog, ipcMain, session } = require('electron');
+const { app, BrowserWindow, WebContentsView, Menu, clipboard, dialog, ipcMain, session, shell } = require('electron');
 const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -10,6 +10,7 @@ const ENGINES = require('./engines');
 const Bitwarden = require('./bitwarden');
 const { fillLogin, typeFocused } = require('./autofill');
 const startUpdater = require('./updater');
+const menuTemplate = require('./menu');
 
 const TOP = 84; // alto de la barra de UI
 const CONFIG_DIR = path.join(os.homedir(), '.llm-browser');
@@ -48,6 +49,7 @@ function setEngine(id) {
   engine = settings.engine = id;
   saveSettings();
   pushState();
+  refreshMenu();
 }
 
 const activeTab = () => tabs.find(t => t.id === activeId);
@@ -213,6 +215,60 @@ async function bitwardenFlow() {
   }
 }
 
+// ---- Menú superior y ajustes (canal de actualizaciones estable / beta) ----
+let updater = null;
+// Sin elección del usuario, una beta instalada sigue ofreciendo betas (como los ports de 3DS).
+const wantsBetas = () => settings.betas ?? require('../package.json').channel === 'beta';
+
+function setBetas(value) {
+  settings.betas = !!value;
+  saveSettings();
+  updater?.setBetas(settings.betas);
+  refreshMenu();
+}
+
+async function checkUpdatesNow() {
+  const r = await updater.check();
+  const message = r.disabled ? 'Las actualizaciones solo funcionan en la aplicación instalada'
+    : r.error ? 'No se pudo comprobar: ' + r.error
+    : r.available ? `Hay una versión nueva (${r.version}); se te avisará cuando esté lista`
+    : 'Estás en la última versión';
+  dialog.showMessageBox(win, { type: 'info', title: 'Actualizaciones', message, buttons: ['Aceptar'] });
+}
+
+function setAct(on) {
+  actEnabled = !!on;
+  pushState();
+  refreshMenu();
+}
+
+function refreshMenu() {
+  const wc = () => activeTab()?.view.webContents;
+  Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate({
+    newTab: () => { selectTab(newTab(homeUrl()).id); focusUrl(); },
+    closeTab: () => closeTab(activeId),
+    focusUrl,
+    quit: () => app.quit(),
+    reload: () => wc()?.reload(),
+    hardReload: () => wc()?.reloadIgnoringCache(),
+    zoom: d => { const w = wc(); if (w) w.setZoomLevel(d === 0 ? 0 : w.getZoomLevel() + d); },
+    fullscreen: () => win.setFullScreen(!win.isFullScreen()),
+    devtools: () => wc()?.toggleDevTools(),
+    act: () => actEnabled,
+    setAct,
+    bitwarden: bitwardenFlow,
+    engines: Object.entries(ENGINES).map(([id, e]) => ({ id, name: e.name })),
+    engine: () => engine,
+    setEngine,
+    betas: wantsBetas,
+    setBetas,
+    checkUpdates: checkUpdatesNow,
+    about: () => dialog.showMessageBox(win, { type: 'info', title: 'LLM Browser', message: 'LLM Browser ' + app.getVersion(), detail: 'Navegador que un LLM puede ver y controlar vía MCP.\nhttps://github.com/tinaut1986/llm-browser', buttons: ['Aceptar'] }),
+    openProject: () => shell.openExternal('https://github.com/tinaut1986/llm-browser'),
+    openConfig: () => { fs.mkdirSync(CONFIG_DIR, { recursive: true }); shell.openPath(CONFIG_DIR); },
+  })));
+}
+
 const run = fn => fn().catch(e => dialog.showErrorBox('Bitwarden', e.message));
 
 function cycleTab(dir) {
@@ -279,7 +335,7 @@ function writeMcpSnippet() {
 app.whenReady().then(() => {
   if (!gotLock) return;
   win = new BrowserWindow({ width: 1280, height: 860, title: 'LLM Browser', backgroundColor: '#1e1f24', icon: path.join(__dirname, '..', 'build', 'icon.png') });
-  win.removeMenu();
+  refreshMenu();
   ui = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true } });
   win.contentView.addChildView(ui);
   ui.webContents.loadFile(path.join(__dirname, 'ui.html'));
@@ -299,7 +355,7 @@ app.whenReady().then(() => {
       case 'engine': return setEngine(arg);
       case 'bw': return bitwardenFlow();
       case 'cycle': return cycleTab(arg);
-      case 'act': actEnabled = !!arg; return pushState();
+      case 'act': return setAct(arg);
       case 'ready': return pushState();
     }
   });
@@ -308,8 +364,7 @@ app.whenReady().then(() => {
   startApi();
   layout();
   writeMcpSnippet();
-  // La versión se hornea con el canal: una beta instalada sigue ofreciendo betas (como los ports de 3DS).
-  startUpdater({ betas: settings.betas ?? require('../package.json').channel === 'beta', parent: () => win });
+  updater = startUpdater({ betas: wantsBetas(), parent: () => win });
 });
 
 app.on('window-all-closed', () => app.quit());
