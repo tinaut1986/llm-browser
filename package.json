@@ -9,6 +9,7 @@
   "scripts": {
     "start": "electron .",
     "mcp": "node src/mcp.js",
+    "test": "node --test test/*.test.js",
     "dist": "electron-builder --publish never",
     "icon": "python3 scripts/make-icon.py"
   },
