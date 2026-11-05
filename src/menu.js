@@ -7,8 +7,12 @@ module.exports = function menuTemplate(h) {
   return [
     ...(mac ? [{ role: 'appMenu' }] : []),
     { label: 'Archivo', submenu: [
-      shown('Pestaña nueva', 'CmdOrCtrl+T', h.newTab),
-      shown('Cerrar pestaña', 'CmdOrCtrl+W', h.closeTab),
+      // Estos tres sí registran el atajo: si el teclado se queda sin ningún foco (ni página ni interfaz),
+      // before-input-event no llega a ver nada y solo el menú puede recogerlos. Si la ventana los
+      // gestiona antes (preventDefault), el menú no se dispara dos veces.
+      shown('Pestaña nueva', 'CmdOrCtrl+T', h.newTab, { registerAccelerator: true }),
+      shown('Cerrar pestaña', 'CmdOrCtrl+W', h.closeTab, { registerAccelerator: true }),
+      shown('Reabrir pestaña cerrada', 'CmdOrCtrl+Shift+T', h.reopenTab, { registerAccelerator: true }),
       { type: 'separator' },
       shown('Ir a la barra de direcciones', 'CmdOrCtrl+L', h.focusUrl),
       { type: 'separator' },

@@ -87,6 +87,7 @@
     if (e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); api.cmd('bm', { op: 'manager' }); return; }
     if (e.key === 'Tab') { e.preventDefault(); api.cmd('cycle', e.shiftKey ? -1 : 1); }
     if (e.key === 'l') { e.preventDefault(); $('url').focus(); }
+    if (e.key === 'T' && e.shiftKey) { e.preventDefault(); api.cmd('reopen'); return; }
     if (e.key === 't') { e.preventDefault(); api.cmd('newtab'); }
     if (e.key === 'w') { e.preventDefault(); const a = st.tabs.find(t => t.active); a && api.cmd('close', a.id); }
   });

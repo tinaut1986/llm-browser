@@ -182,7 +182,24 @@ function bookmarkOp(a) {
   return id;
 }
 
+// Devolver el teclado a la pestaña activa. Justo tras mostrar una vista que estaba oculta (o recién creada, o
+// cargando una página) el focus() inmediato puede perderse: se reintenta un instante después, salvo que
+// mientras tanto el usuario haya pedido el foco en la barra de direcciones o en el buscador.
+let focusSeq = 0;
+function focusPage() {
+  const seq = ++focusSeq;
+  const go = () => {
+    if (seq !== focusSeq || !win || win.isDestroyed() || !win.isFocused()) return;
+    const t = activeTab();
+    if (t && !t.view.webContents.isDestroyed()) t.view.webContents.focus();
+  };
+  go();
+  setTimeout(go, 50);
+  setTimeout(go, 250);
+}
+
 function focusUrl() {
+  focusSeq++;
   ui.webContents.focus();
   ui.webContents.send('focus-url');
 }
@@ -211,6 +228,7 @@ function layout() {
 }
 
 function openFind() {
+  focusSeq++;
   findOpen = true;
   layout();
   ui.webContents.focus();
@@ -223,7 +241,7 @@ function closeFind() {
   for (const t of tabs) t.view.webContents.stopFindInPage('clearSelection');
   layout();
   ui.webContents.send('find-close');
-  activeTab()?.view.webContents.focus();
+  focusPage();
 }
 
 function findText(text, opts = {}) {
@@ -293,7 +311,8 @@ function newTab(url = 'about:blank') {
     if (k === 'f6') { ev.preventDefault(); focusUrl(); return; }
     if (!mod) return;
     if (k === 'tab') { ev.preventDefault(); cycleTab(input.shift ? -1 : 1); return; }
-    if (k === 't') { ev.preventDefault(); selectTab(newTab().id); focusUrl(); }
+    if (k === 't' && input.shift) { ev.preventDefault(); reopenTab(); }
+    else if (k === 't') { ev.preventDefault(); selectTab(newTab().id); focusUrl(); }
     else if (k === 'w') { ev.preventDefault(); closeTab(t.id); }
     else if (k === 'l') { ev.preventDefault(); focusUrl(); }
   });
@@ -409,6 +428,7 @@ function refreshMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate({
     newTab: () => { selectTab(newTab(homeUrl()).id); focusUrl(); },
     closeTab: () => closeTab(activeId),
+    reopenTab,
     focusUrl,
     isBookmarked: () => { const t = activeTab(); return !!t && isBookmarked(t.url); },
     toggleBookmark,
@@ -443,7 +463,7 @@ function cycleTab(dir) {
   if (tabs.length < 2) return;
   const i = tabs.findIndex(t => t.id === activeId);
   selectTab(tabs[(i + dir + tabs.length) % tabs.length].id);
-  activeTab().view.webContents.focus(); // si no, el teclado se queda en la pestaña ya oculta
+  focusPage(); // si no, el teclado se queda en la pestaña ya oculta
 }
 
 function closeTab(id) {
@@ -451,13 +471,23 @@ function closeTab(id) {
   if (i < 0) throw new Error('Pestaña inexistente: ' + id);
   const wasActive = activeId === id;
   const [t] = tabs.splice(i, 1);
+  if (t.url && t.url !== 'about:blank') { closedTabs.push(t.url); if (closedTabs.length > 25) closedTabs.shift(); }
   win.contentView.removeChildView(t.view);
   t.view.webContents.close();
   if (!tabs.length) newTab(homeUrl());
   else if (activeId === id) selectTab(tabs[Math.max(0, i - 1)].id);
   // la pestaña cerrada tenía el foco del teclado; sin esto Ctrl+W/Ctrl+T dejan de funcionar hasta hacer clic
-  if (wasActive && win?.isFocused()) activeTab()?.view.webContents.focus();
+  if (wasActive) focusPage();
   pushState();
+}
+
+// Ctrl+Mayús+T: reabre la última pestaña cerrada (solo recuerda URLs reales, no pestañas en blanco).
+const closedTabs = [];
+function reopenTab() {
+  const url = closedTabs.pop();
+  if (!url) return;
+  selectTab(newTab(url).id);
+  focusPage();
 }
 
 const call = makeTools({
@@ -517,7 +547,7 @@ app.whenReady().then(() => {
     const w = activeTab()?.view.webContents;
     switch (cmd) {
       case 'newtab': return selectTab(newTab(homeUrl()).id);
-      case 'select': selectTab(arg); return activeTab().view.webContents.focus();
+      case 'select': selectTab(arg); return focusPage();
       case 'close': return closeTab(arg);
       case 'nav': call('navigate', { url: arg }, { user: true }).catch(() => {}); return;
       case 'back': return w?.navigationHistory.goBack();
@@ -528,6 +558,7 @@ app.whenReady().then(() => {
       case 'bookmark': return toggleBookmark();
       case 'bm': return bookmarkOp(arg);
       case 'cycle': return cycleTab(arg);
+      case 'reopen': return reopenTab();
       case 'act': return setAct(arg);
       case 'find': return findText(arg.text, arg);
       case 'findopen': return openFind();
