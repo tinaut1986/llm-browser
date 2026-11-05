@@ -11,6 +11,7 @@ Navegador Electron (Windows/Linux/macOS) que un LLM puede ver y controlar vía M
 Lectura: `read_page` (texto + `[ref]` interactivos), `get_text`, `screenshot`, `tabs`, `console_logs`, `select_tab`.
 Acciones: `navigate`, `back`, `forward`, `reload`, `new_tab`, `close_tab`, `click`, `mouse_move`, `drag`, `wheel`, `type`, `press_key`, `scroll`, `select_option`, `evaluate`.
 Los `ref` solo valen hasta la siguiente llamada a `read_page`.
+El modelo solo puede navegar a `http`, `https` y `about:` (no `file:`, `data:`, `javascript:`); la barra de URL del usuario no tiene esa limitación y funciona también en modo solo lectura.
 El ratón del modelo es virtual: se ve como un círculo rojo en la página (se desvanece a los 6 s sin uso). `click`, `mouse_move`, `drag` y `wheel` lo mueven y generan eventos de ratón reales; las coordenadas son píxeles de la captura.
 
 ## Instalar
@@ -18,7 +19,7 @@ Descarga el instalador de la [última versión](https://github.com/tinaut1986/ll
 Windows `.exe`, Linux `.AppImage` o `.deb`, macOS `.dmg` (sin firmar y sin probar: Gatekeeper pide abrirla desde Ajustes → Privacidad y seguridad).
 
 La app se actualiza sola desde las releases de GitHub en Windows y en el AppImage de Linux (avisa y pide reiniciar). En macOS y con el `.deb` solo avisa de que hay versión nueva y abre su página.
-Las betas (releases marcadas como pre-release) solo se ofrecen si la app instalada es una beta o si `~/.llm-browser/settings.json` tiene `"betas": true`.
+El canal de actualizaciones (estable o beta) se elige en el menú Ajustes, junto con «Buscar actualizaciones ahora»; se guarda en `~/.llm-browser/settings.json` (`"betas"`). Sin elegir, una beta instalada sigue en el canal beta y una estable en el estable.
 
 ## Registrar el MCP
 Instalada: la app escribe en `~/.llm-browser/mcp.json` el comando exacto para su ruta de instalación (usa el propio ejecutable como Node con `ELECTRON_RUN_AS_NODE=1`). Copia ese bloque `mcpServers` en la configuración del cliente.
@@ -43,4 +44,4 @@ El icono sale de `scripts/make-icon.py` (`npm run icon`, necesita Pillow).
 
 ## Bitwarden
 Botón 🔑 de la barra (o Ctrl+Mayús+L): rellena usuario y contraseña de la página desde la bóveda, o el código 2FA en el campo con foco. Usa la CLI `bw` (la app de escritorio no sirve): `npm i -g @bitwarden/cli` o `sudo snap install bw`, y `bw login` una vez en una terminal. Si está en otra ruta: `BW_PATH=/ruta/bw npm start`. Sin la CLI el navegador funciona igual y el botón explica cómo instalarla.
-La contraseña maestra se pide en una ventana propia y la clave de sesión solo vive en memoria. Lo dispara únicamente el usuario: el modelo no tiene herramienta para ello y nunca ve los secretos.
+La contraseña maestra se pide en una ventana propia y la clave de sesión solo vive en memoria. Lo dispara únicamente el usuario: el modelo no tiene herramienta para ello. `read_page` oculta los campos de contraseña y `evaluate` queda bloqueado en esa pestaña hasta la siguiente navegación, para que el modelo no pueda leer lo rellenado.

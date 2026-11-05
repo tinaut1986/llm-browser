@@ -19,16 +19,47 @@
   #engine { height: 30px; padding: 0 6px; border-radius: 6px; border: 0; background: #1e1f24; color: inherit; font: inherit; cursor: pointer; }
   #act { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; cursor: pointer; background: #2d5a3a; }
   #act.off { background: #5a2d2d; }
+  #site { cursor: grab; padding: 4px 4px; font-size: 14px; }
+  #bmbar { display: flex; align-items: center; gap: 2px; height: 30px; padding: 0 6px; background: #2f3138; overflow: hidden; white-space: nowrap; }
+  #bmbar.hidden { display: none; }
+  #bmbar.drop-end { box-shadow: inset -3px 0 0 #6ea8ff; }
+  #bmbar .hint { opacity: .45; padding: 0 6px; pointer-events: none; }
+  .bm { display: flex; align-items: center; gap: 5px; flex: none; max-width: 170px; padding: 3px 8px; border-radius: 6px; cursor: pointer; }
+  .bm span { overflow: hidden; text-overflow: ellipsis; }
+  .bm:hover { background: #454853; }
+  .bm.drop-in { background: #3d5a8a; }
+  .bm.drop-before { box-shadow: inset 3px 0 0 #6ea8ff; }
+  .bm.drop-after { box-shadow: inset -3px 0 0 #6ea8ff; }
+  #find { display: none; align-items: center; gap: 6px; padding: 0 8px; height: 40px; background: #2a2c33; justify-content: flex-end; }
+  #find.on { display: flex; }
+  #fq { width: 260px; height: 28px; padding: 0 10px; border-radius: 6px; border: 0; background: #1e1f24; color: inherit; font: inherit; user-select: text; outline: none; }
+  #fq:focus { box-shadow: 0 0 0 2px #6ea8ff; }
+  #fq.none { box-shadow: 0 0 0 2px #c0504d; }
+  #fcount { min-width: 56px; opacity: .7; text-align: center; }
+  #find button { all: unset; cursor: pointer; padding: 3px 9px; border-radius: 6px; }
+  #find button:hover { background: #555; }
+  #find label { display: flex; align-items: center; gap: 4px; cursor: pointer; opacity: .85; }
 </style>
 <div id="tabs"></div>
 <div id="bar">
   <button id="back" title="Atrás">←</button>
   <button id="fwd" title="Adelante">→</button>
   <button id="reload" title="Recargar">⟳</button>
+  <span id="site" draggable="true" title="Arrástrala a la barra de marcadores para guardar esta página">🌐</span>
   <input id="url" spellcheck="false" placeholder="Buscar o escribir una dirección">
+  <button id="star" title="Añadir a marcadores (Ctrl+D)">☆</button>
   <button id="bw" title="Rellenar desde Bitwarden (Ctrl+Mayús+L)">🔑</button>
   <select id="engine" title="Buscador por defecto (pestañas nuevas y búsquedas desde la barra)"></select>
   <div id="act" title="Permitir que el modelo haga clic, escriba y navegue (si está apagado, solo puede leer)"></div>
+</div>
+<div id="bmbar" class="hidden"></div>
+<div id="find">
+  <input id="fq" spellcheck="false" placeholder="Buscar en la página">
+  <span id="fcount"></span>
+  <label><input type="checkbox" id="fcase"> Aa</label>
+  <button id="fprev" title="Anterior (Mayús+Intro)">↑</button>
+  <button id="fnext" title="Siguiente (Intro)">↓</button>
+  <button id="fclose" title="Cerrar (Esc)">✕</button>
 </div>
 <script>
   const $ = id => document.getElementById(id);
@@ -37,6 +68,7 @@
   $('fwd').onclick = () => api.cmd('forward');
   $('reload').onclick = () => api.cmd('reload');
   $('bw').onclick = () => api.cmd('bw');
+  $('star').onclick = () => api.cmd('bookmark');
   $('engine').onchange = () => { api.cmd('engine', $('engine').value); $('engine').blur(); };
   $('act').onclick = () => api.cmd('act', !st.act);
   $('url').addEventListener('keydown', e => {
@@ -48,13 +80,105 @@
     if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key === 'r')) { e.preventDefault(); api.cmd('reload'); return; }
     if (e.key === 'F6') { e.preventDefault(); $('url').focus(); return; }
     if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.key.toLowerCase() === 'f') { e.preventDefault(); $('find').classList.add('on'); api.cmd('findopen'); return; }
     if (e.shiftKey && e.key.toLowerCase() === 'l') { e.preventDefault(); api.cmd('bw'); return; }
+    if (e.key === 'd' && !e.shiftKey) { e.preventDefault(); api.cmd('bookmark'); return; }
+    if (e.shiftKey && e.key.toLowerCase() === 'b') { e.preventDefault(); api.cmd('bm', { op: 'toggleBar' }); return; }
+    if (e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); api.cmd('bm', { op: 'manager' }); return; }
     if (e.key === 'Tab') { e.preventDefault(); api.cmd('cycle', e.shiftKey ? -1 : 1); }
     if (e.key === 'l') { e.preventDefault(); $('url').focus(); }
+    if (e.key === 'T' && e.shiftKey) { e.preventDefault(); api.cmd('reopen'); return; }
     if (e.key === 't') { e.preventDefault(); api.cmd('newtab'); }
     if (e.key === 'w') { e.preventDefault(); const a = st.tabs.find(t => t.active); a && api.cmd('close', a.id); }
   });
+  const doFind = (forward = true, findNext = false) => api.cmd('find', { text: $('fq').value, forward, findNext, matchCase: $('fcase').checked });
+  $('fq').addEventListener('input', () => doFind(true, false));
+  $('fcase').onchange = () => doFind(true, false);
+  $('fnext').onclick = () => { doFind(true, true); $('fq').focus(); };
+  $('fprev').onclick = () => { doFind(false, true); $('fq').focus(); };
+  $('fclose').onclick = () => api.cmd('findclose');
+  $('fq').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); doFind(!e.shiftKey, true); }
+    if (e.key === 'Escape') { e.preventDefault(); api.cmd('findclose'); }
+  });
+  api.onFind((ev, r) => {
+    if (ev === 'open') { $('find').classList.add('on'); $('fq').focus(); $('fq').select(); if ($('fq').value) doFind(true, false); }
+    else if (ev === 'close') { $('find').classList.remove('on'); $('fcount').textContent = ''; $('fq').classList.remove('none'); }
+    else {
+      $('fcount').textContent = $('fq').value ? `${r.active}/${r.total}` : '';
+      $('fq').classList.toggle('none', !!$('fq').value && !r.total);
+    }
+  });
   api.onFocusUrl(() => $('url').focus());
+
+  // ---- Bookmarks bar ----
+  const bar = $('bmbar');
+  const bm = op => api.cmd('bm', op);
+  let barKey = '';
+
+  function renderBar() {
+    bar.classList.toggle('hidden', !st.bookmarksBar);
+    const key = JSON.stringify(st.bookmarks || []);
+    if (key === barKey) return; // rebuilding the nodes mid-drag would cancel the drag
+    barKey = key;
+    bar.textContent = '';
+    for (const n of st.bookmarks || []) {
+      const d = document.createElement('div');
+      d.className = 'bm'; d.draggable = true; d.dataset.id = n.id; d.dataset.type = n.type; d.title = n.url || n.title;
+      const label = document.createElement('span'); label.textContent = n.title;
+      d.append((n.type === 'folder' ? '📁' : '🔖'), label);
+      d.onclick = () => {
+        if (n.type === 'folder') { const r = d.getBoundingClientRect(); bm({ op: 'folderMenu', id: n.id, x: Math.round(r.left), y: Math.round(r.bottom) }); }
+        else bm({ op: 'open', id: n.id });
+      };
+      d.onauxclick = e => { if (e.button === 1 && n.type === 'bookmark') { e.preventDefault(); bm({ op: 'open', id: n.id, newTab: true }); } };
+      d.ondragstart = e => e.dataTransfer.setData('application/x-llmb-bookmark', n.id);
+      bar.append(d);
+    }
+    if (!bar.firstChild) { const h = document.createElement('span'); h.className = 'hint'; h.textContent = 'Arrastra aquí páginas (🌐) para guardarlas en la barra de marcadores'; bar.append(h); }
+  }
+
+  bar.addEventListener('contextmenu', e => { e.preventDefault(); bm({ op: 'ctx', id: e.target.closest('.bm')?.dataset.id ?? null }); });
+  bar.addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); });
+
+  const droppedUrl = dt => (dt.getData('text/uri-list') || dt.getData('text/plain') || '').split(/\r?\n/).map(l => l.trim()).find(l => /^https?:\/\//i.test(l));
+  const clearDrop = () => { bar.classList.remove('drop-end'); for (const b of bar.querySelectorAll('.bm')) b.classList.remove('drop-in', 'drop-before', 'drop-after'); };
+
+  // Where a drop would land: inside a folder (its middle half), before/after another item, or at the end of the bar.
+  function dropTarget(e) {
+    const el = e.target.closest('.bm');
+    if (!el) return { parentId: null, index: null, el: null, mode: 'end' };
+    const r = el.getBoundingClientRect(), x = (e.clientX - r.left) / r.width;
+    if (el.dataset.type === 'folder' && x > .25 && x < .75) return { parentId: el.dataset.id, index: null, el, mode: 'in' };
+    const i = [...bar.querySelectorAll('.bm')].indexOf(el);
+    return x < .5 ? { parentId: null, index: i, el, mode: 'before' } : { parentId: null, index: i + 1, el, mode: 'after' };
+  }
+
+  bar.addEventListener('dragover', e => {
+    e.preventDefault();
+    const t = dropTarget(e);
+    clearDrop();
+    if (t.el) t.el.classList.add('drop-' + t.mode); else bar.classList.add('drop-end');
+  });
+  bar.addEventListener('dragleave', e => { if (!bar.contains(e.relatedTarget)) clearDrop(); });
+  bar.addEventListener('drop', e => {
+    e.preventDefault();
+    const t = dropTarget(e);
+    clearDrop();
+    const id = e.dataTransfer.getData('application/x-llmb-bookmark');
+    if (id) return bm({ op: 'move', id, parentId: t.parentId, index: t.index });
+    const url = droppedUrl(e.dataTransfer);
+    if (url) bm({ op: 'add', url, title: e.dataTransfer.getData('application/x-llmb-title'), parentId: t.parentId, index: t.index });
+  });
+
+  // The globe next to the address bar is the handle to drag the current page onto the bar.
+  $('site').addEventListener('dragstart', e => {
+    const a = st.tabs.find(t => t.active);
+    if (!a || !/^https?:\/\//i.test(a.url)) return e.preventDefault();
+    e.dataTransfer.setData('text/uri-list', a.url);
+    e.dataTransfer.setData('text/plain', a.url);
+    e.dataTransfer.setData('application/x-llmb-title', a.title);
+  });
 
   function render() {
     const tabs = $('tabs'); tabs.textContent = '';
@@ -70,6 +194,9 @@
     const p = document.createElement('button'); p.id = 'plus'; p.textContent = '+'; p.onclick = () => api.cmd('newtab'); tabs.append(p);
     const a = st.tabs.find(t => t.active);
     if (document.activeElement !== $('url')) $('url').value = a ? a.url : '';
+    renderBar();
+    $('star').textContent = st.bookmarked ? '★' : '☆';
+    $('star').title = (st.bookmarked ? 'Quitar de marcadores' : 'Añadir a marcadores') + ' (Ctrl+D)';
     $('back').disabled = !st.canBack; $('fwd').disabled = !st.canForward;
     const eng = $('engine');
     if (eng.options.length !== (st.engines || []).length) for (const e of st.engines || []) eng.add(new Option(e.name, e.id));

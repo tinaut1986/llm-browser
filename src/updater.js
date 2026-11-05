@@ -27,8 +27,9 @@ async function fetchNotes(betas) {
   } catch { return ''; }
 }
 
+// Devuelve { setBetas(bool), check() }; en desarrollo (sin empaquetar) no hay actualizaciones y ambos no hacen nada.
 module.exports = function startUpdater({ betas, parent }) {
-  if (!app.isPackaged) return;
+  if (!app.isPackaged) return { enabled: false, setBetas() {}, check: async () => ({ disabled: true }) };
   const { autoUpdater } = require('electron-updater');
   const auto = process.platform === 'win32' || (process.platform === 'linux' && !!process.env.APPIMAGE);
 
@@ -69,4 +70,24 @@ module.exports = function startUpdater({ betas, parent }) {
   const check = () => autoUpdater.checkForUpdates().catch(() => {}); // sin red: se reintenta luego
   setTimeout(check, 10000);
   setInterval(check, CHECK_EVERY).unref();
+
+  return {
+    enabled: true,
+    // Cambio de canal en caliente: vuelve a preguntar aunque ya se hubiera avisado de esa versión.
+    setBetas(value) {
+      betas = !!value;
+      autoUpdater.allowPrerelease = betas;
+      asked = null;
+    },
+    // Comprobación manual desde Ajustes: informa del resultado en vez de fallar en silencio.
+    async check() {
+      try {
+        const r = await autoUpdater.checkForUpdates();
+        const v = r?.updateInfo?.version;
+        return { available: !!r?.isUpdateAvailable, version: v };
+      } catch (e) {
+        return { error: String(e.message || e).split(/\r?\n/)[0] };
+      }
+    },
+  };
 };

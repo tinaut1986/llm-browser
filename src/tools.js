@@ -4,9 +4,15 @@ const cursorScript = require('./cursor');
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-function normalizeUrl(u, searchUrl) {
+// El modelo solo puede abrir http(s) y about:; file:, data:, javascript:... quedan para el usuario (anyScheme).
+const SAFE_SCHEMES = /^(https?|about):/i;
+
+function normalizeUrl(u, searchUrl, anyScheme = false) {
   u = String(u).trim();
-  if (/^[a-z][a-z0-9+.-]*:/i.test(u) && !/^[^\s/]+:\d+/.test(u)) return u;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(u) && !/^[^\s/]+:\d+/.test(u)) {
+    if (!anyScheme && !SAFE_SCHEMES.test(u)) throw new Error('Esquema de URL no permitido: ' + u.split(':')[0] + ':. Solo http, https y about.');
+    return u;
+  }
   if (/^(localhost|[\w-]+(\.[\w-]+)+)(:\d+)?(\/|$)/i.test(u)) return (/^localhost|^\d/.test(u) ? 'http://' : 'https://') + u;
   return searchUrl(u);
 }
@@ -105,9 +111,9 @@ module.exports = function makeTools(ctx) {
     },
 
     // ---- acciones (requieren interruptor activado) ----
-    async navigate({ url }) {
+    async navigate({ url }, opts = {}) {
       const w = wc();
-      try { await w.loadURL(normalizeUrl(url, ctx.searchUrl)); } catch (e) { if (!/ERR_ABORTED/.test(e.message)) throw e; }
+      try { await w.loadURL(normalizeUrl(url, ctx.searchUrl, opts.user)); } catch (e) { if (!/ERR_ABORTED/.test(e.message)) throw e; }
       await waitLoad(w);
       return { text: `Cargado: ${w.getTitle()} — ${w.getURL()}` };
     },
@@ -191,6 +197,8 @@ module.exports = function makeTools(ctx) {
       return { text: 'ok' };
     },
     async evaluate({ code }) {
+      // Tras rellenar una contraseña con Bitwarden la página tiene secretos en el DOM: el modelo no puede ejecutar JS hasta la siguiente navegación.
+      if (ctx.active()?.secrets) throw new Error('evaluate está bloqueado en esta pestaña: se han rellenado credenciales. Vuelve a estar disponible tras la siguiente navegación.');
       const r = await evalIn(code);
       return { text: typeof r === 'string' ? r : JSON.stringify(r, null, 2) ?? 'undefined' };
     },
@@ -198,11 +206,14 @@ module.exports = function makeTools(ctx) {
 
   const ACTIONS = new Set(['navigate', 'back', 'forward', 'reload', 'new_tab', 'close_tab', 'click', 'mouse_move', 'drag', 'wheel', 'type', 'press_key', 'scroll', 'select_option', 'evaluate']);
 
-  return async function call(name, args) {
+  // opts.user: la acción la inicia el usuario (barra de URL), no el modelo: no depende del interruptor ni de la lista de esquemas.
+  return async function call(name, args, opts = {}) {
     if (!tools[name]) throw new Error('Herramienta desconocida: ' + name);
-    if (ACTIONS.has(name) && !ctx.isActEnabled()) {
+    if (!opts.user && ACTIONS.has(name) && !ctx.isActEnabled()) {
       throw new Error('El usuario ha desactivado las acciones del modelo (interruptor en la barra del navegador). Solo puedes leer.');
     }
-    return tools[name](args || {});
+    return tools[name](args || {}, opts);
   };
 };
+
+module.exports.normalizeUrl = normalizeUrl;
