@@ -59,7 +59,9 @@ const activeTab = () => tabs.find(t => t.id === activeId);
 settings.bookmarks = Bookmarks.normalize(settings.bookmarks);
 const BAR_H = 30;
 const barShown = () => settings.bookmarksBar !== false;
-const uiHeight = () => TOP + (barShown() ? BAR_H : 0);
+const FIND_H = 40; // alto extra de la barra de búsqueda (Ctrl+F)
+let findOpen = false;
+const uiHeight = () => TOP + (barShown() ? BAR_H : 0) + (findOpen ? FIND_H : 0);
 const isBookmarked = url => Bookmarks.hasUrl(settings.bookmarks, url);
 let manager = null;
 
@@ -208,6 +210,29 @@ function layout() {
   for (const t of tabs) t.view.setBounds({ x: 0, y: uiHeight(), width, height: Math.max(0, height - uiHeight()) });
 }
 
+function openFind() {
+  findOpen = true;
+  layout();
+  ui.webContents.focus();
+  ui.webContents.send('find-open');
+}
+
+function closeFind() {
+  if (!findOpen) return;
+  findOpen = false;
+  for (const t of tabs) t.view.webContents.stopFindInPage('clearSelection');
+  layout();
+  ui.webContents.send('find-close');
+  activeTab()?.view.webContents.focus();
+}
+
+function findText(text, opts = {}) {
+  const w = activeTab()?.view.webContents;
+  if (!w) return;
+  if (!text) { w.stopFindInPage('clearSelection'); ui.webContents.send('find-result', { active: 0, total: 0 }); return; }
+  w.findInPage(text, { forward: opts.forward !== false, findNext: !!opts.findNext, matchCase: !!opts.matchCase });
+}
+
 function newTab(url = 'about:blank') {
   const view = new WebContentsView({ webPreferences: { partition: PARTITION, sandbox: true, contextIsolation: true, preload: path.join(__dirname, 'page-preload.js') } });
   const t = { id: nextId++, view, title: '', url, loading: false, logs: [] };
@@ -247,10 +272,15 @@ function newTab(url = 'about:blank') {
       item('Inspeccionar', () => w.inspectElement(p.x, p.y)));
     Menu.buildFromTemplate(m).popup({ window: win });
   });
+  w.on('found-in-page', (_e, r) => {
+    if (activeTab()?.view.webContents === w) ui.webContents.send('find-result', { active: r.activeMatchOrdinal, total: r.matches });
+  });
   w.on('before-input-event', (ev, input) => {
     if (input.type !== 'keyDown') return;
     const mod = input.control || input.meta;
     const k = input.key.toLowerCase();
+    if (mod && k === 'f') { ev.preventDefault(); openFind(); return; }
+    if (k === 'escape' && findOpen) { ev.preventDefault(); closeFind(); return; }
     if (k === 'f5' || (mod && k === 'r')) {
       ev.preventDefault();
       if (input.shift || (mod && k === 'f5')) w.reloadIgnoringCache(); else w.reload();
@@ -419,11 +449,14 @@ function cycleTab(dir) {
 function closeTab(id) {
   const i = tabs.findIndex(t => t.id === id);
   if (i < 0) throw new Error('Pestaña inexistente: ' + id);
+  const wasActive = activeId === id;
   const [t] = tabs.splice(i, 1);
   win.contentView.removeChildView(t.view);
   t.view.webContents.close();
   if (!tabs.length) newTab(homeUrl());
   else if (activeId === id) selectTab(tabs[Math.max(0, i - 1)].id);
+  // la pestaña cerrada tenía el foco del teclado; sin esto Ctrl+W/Ctrl+T dejan de funcionar hasta hacer clic
+  if (wasActive && win?.isFocused()) activeTab()?.view.webContents.focus();
   pushState();
 }
 
@@ -496,6 +529,9 @@ app.whenReady().then(() => {
       case 'bm': return bookmarkOp(arg);
       case 'cycle': return cycleTab(arg);
       case 'act': return setAct(arg);
+      case 'find': return findText(arg.text, arg);
+      case 'findopen': return openFind();
+      case 'findclose': return closeFind();
       case 'ready': return pushState();
     }
   });
