@@ -30,6 +30,15 @@
   .bm.drop-in { background: #3d5a8a; }
   .bm.drop-before { box-shadow: inset 3px 0 0 #6ea8ff; }
   .bm.drop-after { box-shadow: inset -3px 0 0 #6ea8ff; }
+  #find { display: none; align-items: center; gap: 6px; padding: 0 8px; height: 40px; background: #2a2c33; justify-content: flex-end; }
+  #find.on { display: flex; }
+  #fq { width: 260px; height: 28px; padding: 0 10px; border-radius: 6px; border: 0; background: #1e1f24; color: inherit; font: inherit; user-select: text; outline: none; }
+  #fq:focus { box-shadow: 0 0 0 2px #6ea8ff; }
+  #fq.none { box-shadow: 0 0 0 2px #c0504d; }
+  #fcount { min-width: 56px; opacity: .7; text-align: center; }
+  #find button { all: unset; cursor: pointer; padding: 3px 9px; border-radius: 6px; }
+  #find button:hover { background: #555; }
+  #find label { display: flex; align-items: center; gap: 4px; cursor: pointer; opacity: .85; }
 </style>
 <div id="tabs"></div>
 <div id="bar">
@@ -44,6 +53,14 @@
   <div id="act" title="Permitir que el modelo haga clic, escriba y navegue (si está apagado, solo puede leer)"></div>
 </div>
 <div id="bmbar" class="hidden"></div>
+<div id="find">
+  <input id="fq" spellcheck="false" placeholder="Buscar en la página">
+  <span id="fcount"></span>
+  <label><input type="checkbox" id="fcase"> Aa</label>
+  <button id="fprev" title="Anterior (Mayús+Intro)">↑</button>
+  <button id="fnext" title="Siguiente (Intro)">↓</button>
+  <button id="fclose" title="Cerrar (Esc)">✕</button>
+</div>
 <script>
   const $ = id => document.getElementById(id);
   let st = { tabs: [], act: true };
@@ -63,6 +80,7 @@
     if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key === 'r')) { e.preventDefault(); api.cmd('reload'); return; }
     if (e.key === 'F6') { e.preventDefault(); $('url').focus(); return; }
     if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.key.toLowerCase() === 'f') { e.preventDefault(); $('find').classList.add('on'); api.cmd('findopen'); return; }
     if (e.shiftKey && e.key.toLowerCase() === 'l') { e.preventDefault(); api.cmd('bw'); return; }
     if (e.key === 'd' && !e.shiftKey) { e.preventDefault(); api.cmd('bookmark'); return; }
     if (e.shiftKey && e.key.toLowerCase() === 'b') { e.preventDefault(); api.cmd('bm', { op: 'toggleBar' }); return; }
@@ -71,6 +89,24 @@
     if (e.key === 'l') { e.preventDefault(); $('url').focus(); }
     if (e.key === 't') { e.preventDefault(); api.cmd('newtab'); }
     if (e.key === 'w') { e.preventDefault(); const a = st.tabs.find(t => t.active); a && api.cmd('close', a.id); }
+  });
+  const doFind = (forward = true, findNext = false) => api.cmd('find', { text: $('fq').value, forward, findNext, matchCase: $('fcase').checked });
+  $('fq').addEventListener('input', () => doFind(true, false));
+  $('fcase').onchange = () => doFind(true, false);
+  $('fnext').onclick = () => { doFind(true, true); $('fq').focus(); };
+  $('fprev').onclick = () => { doFind(false, true); $('fq').focus(); };
+  $('fclose').onclick = () => api.cmd('findclose');
+  $('fq').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); doFind(!e.shiftKey, true); }
+    if (e.key === 'Escape') { e.preventDefault(); api.cmd('findclose'); }
+  });
+  api.onFind((ev, r) => {
+    if (ev === 'open') { $('find').classList.add('on'); $('fq').focus(); $('fq').select(); if ($('fq').value) doFind(true, false); }
+    else if (ev === 'close') { $('find').classList.remove('on'); $('fcount').textContent = ''; $('fq').classList.remove('none'); }
+    else {
+      $('fcount').textContent = $('fq').value ? `${r.active}/${r.total}` : '';
+      $('fq').classList.toggle('none', !!$('fq').value && !r.total);
+    }
   });
   api.onFocusUrl(() => $('url').focus());
 
