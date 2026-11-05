@@ -318,7 +318,9 @@ function newTab(url = 'about:blank') {
   });
   layout();
   selectTab(t.id);
-  if (url !== 'about:blank') w.loadURL(url).catch(() => {});
+  // También about:blank: una vista que nunca ha navegado no tiene renderer vivo, no puede recibir el foco al hacer
+  // clic y entonces ni Ctrl+T ni Ctrl+W llegan a ninguna parte.
+  w.loadURL(url).catch(() => {});
   return t;
 }
 
@@ -532,6 +534,7 @@ function writeMcpSnippet() {
     fs.writeFileSync(path.join(CONFIG_DIR, 'mcp.json'), JSON.stringify({ mcpServers: { 'llm-browser': cmd } }, null, 2));
   } catch {}
 }
+
 
 app.whenReady().then(() => {
   if (!gotLock) return;
