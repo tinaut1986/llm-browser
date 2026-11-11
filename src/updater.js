@@ -64,14 +64,14 @@ function localNotes(dir, lang, current) {
 }
 
 // Devuelve { setBetas(bool), setLanguage(code), checkNow() }.
-module.exports = function startUpdater({ betas, lang, parent }) {
+module.exports = function startUpdater({ betas, lang, parent, beforeInstall = () => {} }) {
   const demoDir = !app.isPackaged && process.env.LLMB_UPDATER_DEMO;
   const enabled = app.isPackaged || !!demoDir;
   const auto = !!demoDir || process.platform === 'win32' || (process.platform === 'linux' && !!process.env.APPIMAGE);
   const autoUpdater = app.isPackaged ? require('electron-updater').autoUpdater : null;
   let t = I18n.translator(lang);
 
-  // phase: idle | checking | none | disabled | error | downloading | manual | ready
+  // phase: idle | checking | none | disabled | error | downloading | manual | ready | installing
   const state = { phase: 'idle', current: app.getVersion(), version: null, progress: null, error: null, notes: null, notesFailed: false };
   let win = null, manual = false, shownFor = null, notesFor = null;
 
@@ -116,8 +116,13 @@ module.exports = function startUpdater({ betas, lang, parent }) {
   ipcMain.on('upd-action', (e, action) => {
     if (!win || e.sender !== win.webContents) return;
     if (action === 'restart') {
-      if (demoDir) return win.close();
-      return setImmediate(() => autoUpdater.quitAndInstall());
+      if (state.phase !== 'ready') return;
+      // Se avisa en la ventana de que la app se cerrará y volverá sola; luego el instalador one-click de
+      // Windows enseña su propia barra de progreso (no es silencioso a propósito: sin ninguna ventana
+      // durante los segundos que tarda, parecería colgado) y reabre la app (isForceRunAfter) con sus pestañas.
+      set({ phase: 'installing' });
+      beforeInstall();
+      return setTimeout(() => (demoDir ? win?.close() : autoUpdater.quitAndInstall(false, true)), 1500);
     }
     if (action === 'open') shell.openExternal(`${RELEASES}/tag/v${state.version}`);
     if (action === 'retry') return check(true);

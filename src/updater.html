@@ -65,6 +65,7 @@
     downloading: s => ['⬇', t('Downloading LLM Browser {version}', { version: s.version }), t('You can keep browsing; you will be told when it is ready to install.'), 'bar', true, [[t('Hide'), 'later']]],
     manual:      s => ['⬇', t('A new version is available: LLM Browser {version}', { version: s.version }), t('On this system the update is manual: download the installer from the release page.'), null, true, [[t('Later'), 'later'], [t('Open release page'), 'open', true]]],
     ready:       s => ['✓', t('LLM Browser {version} is ready', { version: s.version }), t('It will be installed when you restart the app.'), 'done', true, [[t('Later'), 'later'], [t('Restart now'), 'restart', true]]],
+    installing:  s => ['⟳', t('Installing LLM Browser {version}…', { version: s.version }), t('The app will close and reopen by itself in a few seconds, with your tabs.'), 'busy', true, []],
   };
 
   function renderNotes(s) {
@@ -98,7 +99,7 @@
     $('progress').classList.toggle('hidden', !bar);
     const p = s.progress || {};
     const pct = bar === 'done' ? 100 : p.percent;
-    const known = typeof pct === 'number' && (pct > 0 || bar === 'done');
+    const known = (bar === 'bar' || bar === 'done') && typeof pct === 'number' && (pct > 0 || bar === 'done');
     $('track').classList.toggle('busy', bar === 'busy' || (bar === 'bar' && !known));
     $('fill').style.width = known ? pct.toFixed(1) + '%' : '';
     $('fill').classList.toggle('done', bar === 'done');
@@ -123,7 +124,7 @@
     }
   }
 
-  window.addEventListener('keydown', e => { if (e.key === 'Escape') api.action('later'); });
+  window.addEventListener('keydown', e => { if (e.key === 'Escape' && $('buttons').childElementCount) api.action('later'); });
   api.onState(render);
   render({ phase: 'idle' });
 </script>

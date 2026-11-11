@@ -52,12 +52,17 @@ if (settings.keepActive) {
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
 }
+// Antes de un reinicio que no pide el usuario (Mantener activo, instalar una actualización): el siguiente
+// arranque reabre estas pestañas en vez de una nueva (la sesión y las cookies ya persisten).
+function rememberTabs() {
+  settings.restoreTabs = { urls: tabs.map(t => t.url || 'about:blank'), active: tabs.findIndex(t => t.id === activeId) };
+  saveSettings();
+}
 function setKeepActive(on) {
   on = !!on;
   if (on === !!settings.keepActive) return `Mantener activo ya estaba ${on ? 'activado' : 'desactivado'}; no hace falta reiniciar.`;
   settings.keepActive = on;
-  settings.restoreTabs = { urls: tabs.map(t => t.url || 'about:blank'), active: tabs.findIndex(t => t.id === activeId) };
-  saveSettings();
+  rememberTabs();
   setTimeout(() => { app.relaunch(); app.quit(); }, 300);
   return `Mantener activo ${on ? 'activado' : 'desactivado'}. El navegador se reinicia ahora y reabre las ${tabs.length} pestañas; espera unos segundos antes de la siguiente acción.`;
 }
@@ -612,7 +617,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('bm', (_e, a) => bookmarkOp(a));
 
-  // Tras reiniciar por "Mantener activo" se reabren las pestañas que había (la sesión y las cookies ya persisten).
+  // Tras reiniciar por "Mantener activo" o por una actualización se reabren las pestañas que había.
   const restore = settings.restoreTabs;
   if (restore) { delete settings.restoreTabs; saveSettings(); }
   const reopened = (restore?.urls || []).filter(u => /^(https?|about):/i.test(u)).map(u => newTab(u));
@@ -621,7 +626,7 @@ app.whenReady().then(() => {
   startApi();
   layout();
   writeMcpSnippet();
-  updater = startUpdater({ betas: wantsBetas(), lang, parent: () => win });
+  updater = startUpdater({ betas: wantsBetas(), lang, parent: () => win, beforeInstall: rememberTabs });
 });
 
 app.on('window-all-closed', () => app.quit());
