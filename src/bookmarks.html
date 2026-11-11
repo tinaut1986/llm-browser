@@ -1,6 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>Gestión de marcadores</title>
+<title>Bookmark manager</title>
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: #1e1f24; color: #e6e6e6; font: 13px system-ui, sans-serif; user-select: none; overflow: hidden; }
@@ -32,21 +32,24 @@
   #hint { padding: 6px 12px; font-size: 12px; opacity: .5; background: #2a2c33; }
 </style>
 <div id="tools">
-  <button id="nf">📁 Nueva carpeta</button>
-  <button id="nb">🔖 Nuevo marcador</button>
-  <button id="del">🗑 Eliminar</button>
+  <button id="nf">📁 <span data-i18n="New folder"></span></button>
+  <button id="nb">🔖 <span data-i18n="New bookmark"></span></button>
+  <button id="del">🗑 <span data-i18n="Delete"></span></button>
 </div>
 <div id="main">
   <div id="tree"></div>
   <div id="form" class="off">
-    <label for="name">Nombre</label>
+    <label for="name" data-i18n="Name"></label>
     <input id="name" spellcheck="false">
-    <div id="urlrow"><label for="url">Dirección</label><input id="url" spellcheck="false" style="width:100%"></div>
-    <button id="open">Abrir en una pestaña nueva</button>
+    <div id="urlrow"><label for="url" data-i18n="Address"></label><input id="url" spellcheck="false" style="width:100%"></div>
+    <button id="open" data-i18n="Open in a new tab"></button>
   </div>
 </div>
-<div id="hint">Arrastra para reordenar o mover a una carpeta · doble clic para abrir · Supr para eliminar</div>
+<div id="hint" data-i18n="Drag to reorder or move into a folder · double-click to open · Del to delete"></div>
 <script>
+  i18n.apply();
+  document.title = i18n.t('Bookmark manager');
+  const { t } = i18n;
   const $ = id => document.getElementById(id);
   const MIME = 'application/x-llmb-bookmark';
   let tree = [], selected = null, focusName = false, loaded = false;
@@ -96,7 +99,7 @@
       }
     };
     walk(tree, 0);
-    if (!tree.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = 'Todavía no hay marcadores. Añade uno con ☆ o arrastrando 🌐 a la barra.'; el.append(e); }
+    if (!tree.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = t('No bookmarks yet. Add one with ☆ or by dragging 🌐 onto the bar.'); el.append(e); }
     fillForm();
   }
 
@@ -117,13 +120,13 @@
   $('url').addEventListener('change', commit);
   for (const i of [$('name'), $('url')]) i.addEventListener('keydown', e => { if (e.key === 'Enter') i.blur(); });
   $('open').onclick = () => selected && api.bm({ op: 'open', id: selected, newTab: true });
-  $('nf').onclick = async () => { const p = insertionPoint(); select(await api.bm({ op: 'addFolder', title: 'Carpeta nueva', ...p }), true); };
-  $('nb').onclick = async () => { const p = insertionPoint(); select(await api.bm({ op: 'add', title: 'Nuevo marcador', url: 'https://example.com', ...p }), true); };
+  $('nf').onclick = async () => { const p = insertionPoint(); select(await api.bm({ op: 'addFolder', title: t('New folder'), ...p }), true); };
+  $('nb').onclick = async () => { const p = insertionPoint(); select(await api.bm({ op: 'add', title: t('New bookmark'), url: 'https://example.com', ...p }), true); };
 
   function removeSelected() {
     const n = selected && find(tree, selected);
     if (!n) return;
-    if (n.type === 'folder' && n.children.length && !confirm('¿Eliminar la carpeta «' + n.title + '» y todo lo que contiene?')) return;
+    if (n.type === 'folder' && n.children.length && !confirm(t('Delete the folder “{name}” and everything in it?', { name: n.title }))) return;
     api.bm({ op: 'remove', id: n.id });
   }
   $('del').onclick = removeSelected;

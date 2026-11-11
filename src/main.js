@@ -12,6 +12,7 @@ const { fillLogin, typeFocused } = require('./autofill');
 const startUpdater = require('./updater');
 const menuTemplate = require('./menu');
 const Bookmarks = require('./bookmarks');
+const I18n = require('./i18n');
 
 const TOP = 84; // alto de la barra de UI
 const CONFIG_DIR = path.join(os.homedir(), '.llm-browser');
@@ -59,6 +60,23 @@ function setKeepActive(on) {
   saveSettings();
   setTimeout(() => { app.relaunch(); app.quit(); }, 300);
   return `Mantener activo ${on ? 'activado' : 'desactivado'}. El navegador se reinicia ahora y reabre las ${tabs.length} pestañas; espera unos segundos antes de la siguiente acción.`;
+}
+// ---- Idioma de la interfaz (Ajustes -> Idioma; "system" sigue al sistema) ----
+let lang = 'en';
+let tr = I18n.translator('en');
+function applyLanguage() {
+  lang = I18n.resolve(settings.language, app.getPreferredSystemLanguages());
+  tr = I18n.translator(lang);
+}
+function setLanguage(code) {
+  settings.language = I18n.CODES.has(code) ? code : 'system';
+  saveSettings();
+  applyLanguage();
+  refreshMenu();
+  // Las ventanas de la interfaz se recargan para tomar los textos nuevos; las páginas no se tocan.
+  if (ui && !ui.webContents.isDestroyed()) ui.webContents.reload();
+  if (manager && !manager.isDestroyed()) { manager.setTitle(tr('Bookmark manager')); manager.webContents.reload(); }
+  updater?.setLanguage(lang);
 }
 let engine = ENGINES[settings.engine] ? settings.engine : 'duckduckgo';
 const homeUrl = () => ENGINES[engine].home;
@@ -114,7 +132,7 @@ function openManager(selectId) {
     if (selectId) manager.webContents.send('bm-select', selectId);
     return;
   }
-  manager = new BrowserWindow({ parent: win, width: 820, height: 560, minWidth: 560, minHeight: 360, title: 'Gestión de marcadores', backgroundColor: '#1e1f24',
+  manager = new BrowserWindow({ parent: win, width: 820, height: 560, minWidth: 560, minHeight: 360, title: tr('Bookmark manager'), backgroundColor: '#1e1f24',
     webPreferences: { preload: path.join(__dirname, 'bm-preload.js'), contextIsolation: true, sandbox: true } });
   manager.removeMenu();
   manager.loadFile(path.join(__dirname, 'bookmarks.html'));
@@ -127,18 +145,18 @@ const menuLabel = s => (s.length > 60 ? s.slice(0, 57) + '…' : s).replace(/&/g
 
 function folderItems(folder) {
   const urls = Bookmarks.urls(folder);
-  return [...bookmarkItems(folder.children), ...(urls.length ? [{ type: 'separator' }, { label: 'Abrir todos en pestañas', click: () => urls.forEach(u => newTab(u)) }] : [])];
+  return [...bookmarkItems(folder.children), ...(urls.length ? [{ type: 'separator' }, { label: tr('Open all in tabs'), click: () => urls.forEach(u => newTab(u)) }] : [])];
 }
 
 function bookmarkItems(nodes) {
-  if (!nodes.length) return [{ label: '(vacía)', enabled: false }];
+  if (!nodes.length) return [{ label: tr('(empty)'), enabled: false }];
   return nodes.map(n => (n.type === 'folder'
     ? { label: menuLabel(n.title), submenu: folderItems(n) }
     : { label: menuLabel(n.title), toolTip: n.url, click: () => openBookmark(n.url) }));
 }
 
 function newFolder(parentId = null) {
-  const folder = Bookmarks.addFolder(settings.bookmarks, 'Carpeta nueva', parentId);
+  const folder = Bookmarks.addFolder(settings.bookmarks, tr('New folder'), parentId);
   bookmarksChanged();
   openManager(folder.id); // the manager opens with the name selected so it can be typed right away
 }
@@ -146,13 +164,13 @@ function newFolder(parentId = null) {
 function bookmarkContextMenu(id) {
   const node = id ? Bookmarks.find(settings.bookmarks, id)?.node : null;
   const m = [];
-  if (node?.type === 'bookmark') m.push({ label: 'Abrir', click: () => openBookmark(node.url) }, { label: 'Abrir en pestaña nueva', click: () => openBookmark(node.url, true) });
-  if (node?.type === 'folder') m.push({ label: 'Abrir todos en pestañas', enabled: Bookmarks.urls(node).length > 0, click: () => Bookmarks.urls(node).forEach(u => newTab(u)) });
+  if (node?.type === 'bookmark') m.push({ label: tr('Open'), click: () => openBookmark(node.url) }, { label: tr('Open in new tab'), click: () => openBookmark(node.url, true) });
+  if (node?.type === 'folder') m.push({ label: tr('Open all in tabs'), enabled: Bookmarks.urls(node).length > 0, click: () => Bookmarks.urls(node).forEach(u => newTab(u)) });
   if (node) m.push(
-    { label: 'Editar…', click: () => openManager(node.id) },
-    { label: 'Eliminar', click: () => { Bookmarks.remove(settings.bookmarks, node.id); bookmarksChanged(); } },
+    { label: tr('Edit…'), click: () => openManager(node.id) },
+    { label: tr('Delete'), click: () => { Bookmarks.remove(settings.bookmarks, node.id); bookmarksChanged(); } },
     { type: 'separator' });
-  m.push({ label: 'Nueva carpeta', click: () => newFolder() }, { label: 'Gestionar marcadores', click: () => openManager() }, { label: 'Ocultar barra de marcadores', click: toggleBar });
+  m.push({ label: tr('New folder'), click: () => newFolder() }, { label: tr('Manage bookmarks'), click: () => openManager() }, { label: tr('Hide bookmarks bar'), click: toggleBar });
   Menu.buildFromTemplate(m).popup({ window: win });
 }
 
@@ -225,7 +243,7 @@ function pushState() {
   if (!ui || ui.webContents.isDestroyed()) return;
   const t = activeTab();
   ui.webContents.send('state', {
-    tabs: tabs.map(x => ({ id: x.id, title: x.title || x.url || 'Nueva pestaña', url: x.url, active: x.id === activeId, loading: x.loading })),
+    tabs: tabs.map(x => ({ id: x.id, title: x.title || x.url || tr('New tab'), url: x.url, active: x.id === activeId, loading: x.loading })),
     act: actEnabled,
     bookmarked: !!t && isBookmarked(t.url),
     bookmarks: settings.bookmarks,
@@ -291,20 +309,20 @@ function newTab(url = 'about:blank') {
     const sep = { type: 'separator' };
     const nav = w.navigationHistory;
     const m = [];
-    if (p.linkURL) m.push(item('Abrir enlace en pestaña nueva', () => newTab(p.linkURL)), item('Copiar dirección del enlace', () => clipboard.writeText(p.linkURL)), sep);
-    if (p.mediaType === 'image') m.push(item('Abrir imagen en pestaña nueva', () => newTab(p.srcURL)), item('Copiar imagen', () => w.copyImageAt(p.x, p.y)), item('Copiar dirección de la imagen', () => clipboard.writeText(p.srcURL)), sep);
+    if (p.linkURL) m.push(item(tr('Open link in new tab'), () => newTab(p.linkURL)), item(tr('Copy link address'), () => clipboard.writeText(p.linkURL)), sep);
+    if (p.mediaType === 'image') m.push(item(tr('Open image in new tab'), () => newTab(p.srcURL)), item(tr('Copy image'), () => w.copyImageAt(p.x, p.y)), item(tr('Copy image address'), () => clipboard.writeText(p.srcURL)), sep);
     if (p.isEditable) m.push(
-      item('Cortar', () => w.cut(), p.editFlags.canCut),
-      item('Copiar', () => w.copy(), p.editFlags.canCopy),
-      item('Pegar', () => w.paste(), p.editFlags.canPaste),
-      item('Seleccionar todo', () => w.selectAll(), p.editFlags.canSelectAll), sep);
-    else if (p.selectionText) m.push(item('Copiar', () => w.copy()), sep);
+      item(tr('Cut'), () => w.cut(), p.editFlags.canCut),
+      item(tr('Copy'), () => w.copy(), p.editFlags.canCopy),
+      item(tr('Paste'), () => w.paste(), p.editFlags.canPaste),
+      item(tr('Select all'), () => w.selectAll(), p.editFlags.canSelectAll), sep);
+    else if (p.selectionText) m.push(item(tr('Copy'), () => w.copy()), sep);
     m.push(
-      item('Atrás', () => nav.goBack(), nav.canGoBack()),
-      item('Adelante', () => nav.goForward(), nav.canGoForward()),
-      item('Recargar', () => w.reload()),
+      item(tr('Back'), () => nav.goBack(), nav.canGoBack()),
+      item(tr('Forward'), () => nav.goForward(), nav.canGoForward()),
+      item(tr('Reload'), () => w.reload()),
       sep,
-      item('Inspeccionar', () => w.inspectElement(p.x, p.y)));
+      item(tr('Inspect'), () => w.inspectElement(p.x, p.y)));
     Menu.buildFromTemplate(m).popup({ window: win });
   });
   w.on('found-in-page', (_e, r) => {
@@ -378,17 +396,17 @@ function askUnlock() {
   });
 }
 
-const note = (message, detail) => dialog.showMessageBox(win, { type: 'info', title: 'Bitwarden', message, detail, buttons: ['Aceptar'] });
+const note = (message, detail) => dialog.showMessageBox(win, { type: 'info', title: 'Bitwarden', message, detail, buttons: [tr('OK')] });
 
 async function bitwardenFlow() {
   if (bwBusy) return;
   bwBusy = true;
   try {
     if (!(await bw.available())) {
-      return await note('No se encuentra la CLI de Bitwarden (bw)', 'La aplicación de escritorio no sirve para esto; hace falta la CLI.\n\nInstalación:\n  npm install -g @bitwarden/cli\no bien\n  sudo snap install bw\n\nDespués inicia sesión una vez en una terminal con:\n  bw login\n\nSi está instalada en otra ruta, arranca el navegador con BW_PATH=/ruta/a/bw.');
+      return await note(tr('The Bitwarden CLI (bw) was not found'), tr('The desktop app is not enough for this; the CLI is needed.\n\nInstall it with:\n  {npm}\nor\n  {snap}\n\nThen sign in once in a terminal with:\n  {login}\n\nIf it is installed somewhere else, start the browser with {env}.', { npm: 'npm install -g @bitwarden/cli', snap: 'sudo snap install bw', login: 'bw login', env: 'BW_PATH=/path/to/bw' }));
     }
     let st = await bw.status();
-    if (st === 'unauthenticated') return await note('Falta iniciar sesión en Bitwarden', 'Ejecuta una vez en una terminal:\n  bw login\ny vuelve a pulsar 🔑.');
+    if (st === 'unauthenticated') return await note(tr('You are not signed in to Bitwarden'), tr('Run this once in a terminal:\n  {login}\nand press 🔑 again.', { login: 'bw login' }));
     if (st === 'locked' && !(await askUnlock())) return;
     const t = activeTab();
     const items = await bw.logins(t.view.webContents.getURL());
@@ -398,15 +416,15 @@ async function bitwardenFlow() {
       click: () => run(async () => {
         const done = await fillLogin(w, await bw.credentials(i.id));
         if (done.password) t.secrets = true;
-        if (!done.username && !done.password) await note('No encuentro un formulario de login a la vista en esta página');
+        if (!done.username && !done.password) await note(tr('No login form is visible on this page'));
       }),
     }));
-    for (const i of items.filter(x => x.hasTotp)) menu.push({ label: `Código 2FA: ${i.name}`, click: () => run(async () => {
+    for (const i of items.filter(x => x.hasTotp)) menu.push({ label: tr('2FA code: {name}', { name: i.name }), click: () => run(async () => {
       if (await typeFocused(w, await bw.totp(i.id))) t.secrets = true;
-      else await note('Haz clic primero en el campo del código y vuelve a pulsar 🔑');
+      else await note(tr('Click the code field first and press 🔑 again'));
     }) });
-    if (!menu.length) menu.push({ label: 'Sin cuentas para este sitio', enabled: false });
-    menu.push({ type: 'separator' }, { label: 'Bloquear bóveda', click: () => bw.lock() });
+    if (!menu.length) menu.push({ label: tr('No accounts for this site'), enabled: false });
+    menu.push({ type: 'separator' }, { label: tr('Lock vault'), click: () => bw.lock() });
     Menu.buildFromTemplate(menu).popup({ window: win });
   } catch (e) {
     dialog.showErrorBox('Bitwarden', e.message);
@@ -427,14 +445,8 @@ function setBetas(value) {
   refreshMenu();
 }
 
-async function checkUpdatesNow() {
-  const r = await updater.check();
-  const message = r.disabled ? 'Las actualizaciones solo funcionan en la aplicación instalada'
-    : r.error ? 'No se pudo comprobar: ' + r.error
-    : r.available ? `Hay una versión nueva (${r.version}); se te avisará cuando esté lista`
-    : 'Estás en la última versión';
-  dialog.showMessageBox(win, { type: 'info', title: 'Actualizaciones', message, buttons: ['Aceptar'] });
-}
+// Comprobación manual: abre la ventana del actualizador, que muestra la búsqueda y su resultado.
+const checkUpdatesNow = () => updater?.checkNow();
 
 function setAct(on) {
   actEnabled = !!on;
@@ -445,6 +457,10 @@ function setAct(on) {
 function refreshMenu() {
   const wc = () => activeTab()?.view.webContents;
   Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate({
+    t: tr,
+    languages: I18n.LANGUAGES,
+    language: () => (I18n.CODES.has(settings.language) ? settings.language : 'system'),
+    setLanguage,
     newTab: () => { selectTab(newTab(homeUrl()).id); focusUrl(); },
     closeTab: () => closeTab(activeId),
     reopenTab,
@@ -472,7 +488,7 @@ function refreshMenu() {
     checkUpdates: checkUpdatesNow,
     keepActive: () => !!settings.keepActive,
     setKeepActive,
-    about: () => dialog.showMessageBox(win, { type: 'info', title: 'LLM Browser', message: 'LLM Browser ' + app.getVersion(), detail: 'Navegador que un LLM puede ver y controlar vía MCP.\nhttps://github.com/tinaut1986/llm-browser', buttons: ['Aceptar'] }),
+    about: () => dialog.showMessageBox(win, { type: 'info', title: 'LLM Browser', message: 'LLM Browser ' + app.getVersion(), detail: tr('A browser that an LLM can see and control through MCP.') + '\nhttps://github.com/tinaut1986/llm-browser', buttons: [tr('OK')] }),
     openProject: () => shell.openExternal('https://github.com/tinaut1986/llm-browser'),
     openConfig: () => { fs.mkdirSync(CONFIG_DIR, { recursive: true }); shell.openPath(CONFIG_DIR); },
   })));
@@ -559,6 +575,9 @@ function writeMcpSnippet() {
 
 app.whenReady().then(() => {
   if (!gotLock) return;
+  applyLanguage();
+  // Las ventanas de la interfaz (barra, marcadores, Bitwarden, actualizador) piden sus textos al cargar.
+  ipcMain.on('i18n', e => { e.returnValue = { lang, dict: I18n.dict(lang) }; });
   win = new BrowserWindow({ width: 1280, height: 860, title: 'LLM Browser', backgroundColor: '#1e1f24', icon: path.join(__dirname, '..', 'build', 'icon.png') });
   refreshMenu();
   ui = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true } });
@@ -602,7 +621,7 @@ app.whenReady().then(() => {
   startApi();
   layout();
   writeMcpSnippet();
-  updater = startUpdater({ betas: wantsBetas(), parent: () => win });
+  updater = startUpdater({ betas: wantsBetas(), lang, parent: () => win });
 });
 
 app.on('window-all-closed', () => app.quit());

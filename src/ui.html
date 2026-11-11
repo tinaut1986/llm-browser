@@ -42,26 +42,28 @@
 </style>
 <div id="tabs"></div>
 <div id="bar">
-  <button id="back" title="Atrás">←</button>
-  <button id="fwd" title="Adelante">→</button>
-  <button id="reload" title="Recargar">⟳</button>
-  <span id="site" draggable="true" title="Arrástrala a la barra de marcadores para guardar esta página">🌐</span>
-  <input id="url" spellcheck="false" placeholder="Buscar o escribir una dirección">
-  <button id="star" title="Añadir a marcadores (Ctrl+D)">☆</button>
-  <button id="bw" title="Rellenar desde Bitwarden (Ctrl+Mayús+L)">🔑</button>
-  <select id="engine" title="Buscador por defecto (pestañas nuevas y búsquedas desde la barra)"></select>
-  <div id="act" title="Permitir que el modelo haga clic, escriba y navegue (si está apagado, solo puede leer)"></div>
+  <button id="back" data-i18n-title="Back">←</button>
+  <button id="fwd" data-i18n-title="Forward">→</button>
+  <button id="reload" data-i18n-title="Reload">⟳</button>
+  <span id="site" draggable="true" data-i18n-title="Drag it onto the bookmarks bar to save this page">🌐</span>
+  <input id="url" spellcheck="false" data-i18n-placeholder="Search or type an address">
+  <button id="star">☆</button>
+  <button id="bw" data-i18n-title="Fill in from Bitwarden (Ctrl+Shift+L)">🔑</button>
+  <select id="engine" data-i18n-title="Default search engine (new tabs and searches from the bar)"></select>
+  <div id="act" data-i18n-title="Let the model click, type and navigate (when off, it can only read)"></div>
 </div>
 <div id="bmbar" class="hidden"></div>
 <div id="find">
-  <input id="fq" spellcheck="false" placeholder="Buscar en la página">
+  <input id="fq" spellcheck="false" data-i18n-placeholder="Find in page">
   <span id="fcount"></span>
-  <label><input type="checkbox" id="fcase"> Aa</label>
-  <button id="fprev" title="Anterior (Mayús+Intro)">↑</button>
-  <button id="fnext" title="Siguiente (Intro)">↓</button>
-  <button id="fclose" title="Cerrar (Esc)">✕</button>
+  <label data-i18n-title="Match case"><input type="checkbox" id="fcase"> Aa</label>
+  <button id="fprev" data-i18n-title="Previous (Shift+Enter)">↑</button>
+  <button id="fnext" data-i18n-title="Next (Enter)">↓</button>
+  <button id="fclose" data-i18n-title="Close (Esc)">✕</button>
 </div>
 <script>
+  i18n.apply();
+  const { t } = i18n;
   const $ = id => document.getElementById(id);
   let st = { tabs: [], act: true };
   $('back').onclick = () => api.cmd('back');
@@ -135,7 +137,7 @@
       d.ondragstart = e => e.dataTransfer.setData('application/x-llmb-bookmark', n.id);
       bar.append(d);
     }
-    if (!bar.firstChild) { const h = document.createElement('span'); h.className = 'hint'; h.textContent = 'Arrastra aquí páginas (🌐) para guardarlas en la barra de marcadores'; bar.append(h); }
+    if (!bar.firstChild) { const h = document.createElement('span'); h.className = 'hint'; h.textContent = t('Drag pages (🌐) here to save them on the bookmarks bar'); bar.append(h); }
   }
 
   bar.addEventListener('contextmenu', e => { e.preventDefault(); bm({ op: 'ctx', id: e.target.closest('.bm')?.dataset.id ?? null }); });
@@ -196,13 +198,13 @@
     if (document.activeElement !== $('url')) $('url').value = a ? a.url : '';
     renderBar();
     $('star').textContent = st.bookmarked ? '★' : '☆';
-    $('star').title = (st.bookmarked ? 'Quitar de marcadores' : 'Añadir a marcadores') + ' (Ctrl+D)';
+    $('star').title = (st.bookmarked ? t('Remove from bookmarks') : t('Add to bookmarks')) + ' (Ctrl+D)';
     $('back').disabled = !st.canBack; $('fwd').disabled = !st.canForward;
     const eng = $('engine');
     if (eng.options.length !== (st.engines || []).length) for (const e of st.engines || []) eng.add(new Option(e.name, e.id));
     eng.value = st.engine;
     $('act').className = st.act ? '' : 'off';
-    $('act').textContent = st.act ? '🤖 Modelo: puede actuar' : '👁 Modelo: solo lectura';
+    $('act').textContent = st.act ? '🤖 ' + t('Model: can act') : '👁 ' + t('Model: read only');
   }
   api.onState(s => { st = s; render(); });
   api.cmd('ready');

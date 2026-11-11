@@ -121,6 +121,10 @@ jobs:
           PREV=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' "HEAD^" 2>/dev/null || true)
           RANGE="${PREV:+${PREV}..}HEAD"
           [ -f "docs/release-notes/${TAG}.md" ] || echo "::warning::docs/release-notes/${TAG}.md is missing"
+          # The updater shows the notes in the interface language (src/i18n.js), English where a file is missing.
+          for L in es ca fr de it pt ru ja zh tw; do
+            [ -f "docs/release-notes/${TAG}.${L}.md" ] || echo "::warning::docs/release-notes/${TAG}.${L}.md is missing: the updater will show English in that language"
+          done
           {
             if [ "${{ needs.vars.outputs.prerelease }}" = true ]; then
               echo "> **Beta build.** It comes off a \`release/*\` branch that has not been"

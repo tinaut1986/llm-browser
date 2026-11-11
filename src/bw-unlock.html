@@ -11,11 +11,12 @@
   button { height: 30px; padding: 0 14px; border-radius: 6px; border: 0; background: #3a3d46; color: inherit; font: inherit; cursor: pointer; }
   button.ok { background: #2d5a3a; }
 </style>
-<p>Contraseña maestra de Bitwarden</p>
+<p data-i18n="Bitwarden master password"></p>
 <input id="pw" type="password" autofocus autocomplete="off">
 <div id="err"></div>
-<div class="row"><button id="cancel">Cancelar</button><button id="ok" class="ok">Desbloquear</button></div>
+<div class="row"><button id="cancel" data-i18n="Cancel"></button><button id="ok" class="ok" data-i18n="Unlock"></button></div>
 <script>
+  i18n.apply();
   const $ = id => document.getElementById(id);
   const submit = () => $('pw').value && api.submit($('pw').value);
   $('ok').onclick = submit;

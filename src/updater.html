@@ -1,0 +1,129 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LLM Browser</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #1e1f24; color: #e6e6e6; font: 13px system-ui, sans-serif; user-select: none; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; gap: 14px; align-items: center; padding: 18px 20px 14px; background: #2a2c33; }
+  #icon { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 12px; background: #3a3d46; font-size: 24px; }
+  #icon.ok { background: #2d5a3a; }
+  #icon.bad { background: #5a2d2d; }
+  h1 { margin: 0 0 3px; font-size: 16px; font-weight: 600; }
+  #sub { opacity: .7; line-height: 1.4; user-select: text; }
+  #progress { padding: 14px 20px 0; }
+  #progress.hidden, #notes.hidden { display: none; }
+  .track { height: 8px; border-radius: 4px; background: #2a2c33; overflow: hidden; }
+  .fill { height: 100%; width: 0; border-radius: 4px; background: #6ea8ff; transition: width .25s ease-out; }
+  .fill.done { background: #4caf6e; }
+  .track.busy .fill { width: 30%; animation: slide 1.2s ease-in-out infinite; }
+  @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+  #ptext { display: flex; justify-content: space-between; margin-top: 6px; font-size: 12px; opacity: .65; font-variant-numeric: tabular-nums; }
+  #notes { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 16px 20px 0; }
+  #notes h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; opacity: .85; }
+  #list { flex: 1; overflow: auto; padding: 4px 14px 8px; border-radius: 8px; background: #2a2c33; user-select: text; }
+  .ver { display: flex; align-items: center; gap: 8px; margin: 12px 0 4px; font-weight: 600; }
+  .ver:first-child { margin-top: 8px; }
+  .tag { padding: 1px 7px; border-radius: 9px; background: #5a4a2d; font-size: 11px; font-weight: 500; }
+  .tag.en { background: #3a3d46; }
+  ul { margin: 0; padding-left: 18px; }
+  li { margin: 3px 0; line-height: 1.4; }
+  .muted { opacity: .55; padding: 10px 0; }
+  footer { display: flex; gap: 8px; justify-content: flex-end; padding: 14px 20px 16px; margin-top: auto; }
+  button { height: 30px; padding: 0 16px; border-radius: 6px; border: 0; background: #3a3d46; color: inherit; font: inherit; cursor: pointer; }
+  button:hover { background: #4a4e59; }
+  button.primary { background: #2f5d9a; }
+  button.primary:hover { background: #3a6db0; }
+  button:focus-visible { outline: 2px solid #6ea8ff; outline-offset: 1px; }
+</style>
+<header>
+  <div id="icon">⬇</div>
+  <div><h1 id="title"></h1><div id="sub"></div></div>
+</header>
+<div id="progress" class="hidden">
+  <div class="track" id="track"><div class="fill" id="fill"></div></div>
+  <div id="ptext"><span id="pleft"></span><span id="pright"></span></div>
+</div>
+<div id="notes" class="hidden">
+  <h2 data-i18n="What's new"></h2>
+  <div id="list"></div>
+</div>
+<footer id="buttons"></footer>
+<script>
+  i18n.apply();
+  const { t } = i18n;
+  const $ = id => document.getElementById(id);
+  const MB = b => (b / 1048576).toLocaleString(i18n.lang, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+  // Lo que muestra cada fase: icono, título, subtítulo, ¿progreso?, ¿novedades?, botones [texto, acción, principal].
+  const PHASES = {
+    idle:        s => ['⬇', t('Checking for updates…'), '', 'busy', false, [[t('Close'), 'close']]],
+    checking:    s => ['⬇', t('Checking for updates…'), t('Installed version: {version}', { version: s.current }), 'busy', false, [[t('Close'), 'close']]],
+    none:        s => ['✓', t('LLM Browser is up to date'), t('Installed version: {version}', { version: s.current }), null, false, [[t('Close'), 'close', true]]],
+    disabled:    s => ['ⓘ', t('Updates only work in the installed app'), t('Installed version: {version}', { version: s.current }), null, false, [[t('Close'), 'close', true]]],
+    error:       s => ['!', t('Could not update'), s.error || '', null, !!s.version, [[t('Close'), 'close'], [t('Try again'), 'retry', true]]],
+    downloading: s => ['⬇', t('Downloading LLM Browser {version}', { version: s.version }), t('You can keep browsing; you will be told when it is ready to install.'), 'bar', true, [[t('Hide'), 'later']]],
+    manual:      s => ['⬇', t('A new version is available: LLM Browser {version}', { version: s.version }), t('On this system the update is manual: download the installer from the release page.'), null, true, [[t('Later'), 'later'], [t('Open release page'), 'open', true]]],
+    ready:       s => ['✓', t('LLM Browser {version} is ready', { version: s.version }), t('It will be installed when you restart the app.'), 'done', true, [[t('Later'), 'later'], [t('Restart now'), 'restart', true]]],
+  };
+
+  function renderNotes(s) {
+    const list = $('list');
+    list.textContent = '';
+    const muted = text => { const d = document.createElement('div'); d.className = 'muted'; d.textContent = text; list.append(d); };
+    if (s.notesFailed) return muted(t('Could not load what\'s new.'));
+    if (!s.notes) return muted(t('Loading what\'s new…'));
+    if (!s.notes.length) return muted(t('No notes.'));
+    for (const n of s.notes) {
+      const h = document.createElement('div'); h.className = 'ver'; h.textContent = 'v' + n.version;
+      if (n.beta) { const b = document.createElement('span'); b.className = 'tag'; b.textContent = t('Beta'); h.append(b); }
+      if (!n.translated) { const b = document.createElement('span'); b.className = 'tag en'; b.textContent = 'English'; b.title = t('Not translated into your language yet'); h.append(b); }
+      list.append(h);
+      if (!n.lines.length) { muted(t('No notes.')); continue; }
+      const ul = document.createElement('ul');
+      for (const l of n.lines) { const li = document.createElement('li'); li.textContent = l; ul.append(li); }
+      list.append(ul);
+    }
+  }
+
+  let lastButtons = '';
+  function render(s) {
+    const [icon, title, sub, bar, notes, buttons] = (PHASES[s.phase] || PHASES.idle)(s);
+    $('icon').textContent = icon;
+    $('icon').className = icon === '✓' ? 'ok' : icon === '!' ? 'bad' : '';
+    $('title').textContent = title;
+    $('sub').textContent = sub;
+    document.title = title;
+
+    $('progress').classList.toggle('hidden', !bar);
+    const p = s.progress || {};
+    const pct = bar === 'done' ? 100 : p.percent;
+    const known = typeof pct === 'number' && (pct > 0 || bar === 'done');
+    $('track').classList.toggle('busy', bar === 'busy' || (bar === 'bar' && !known));
+    $('fill').style.width = known ? pct.toFixed(1) + '%' : '';
+    $('fill').classList.toggle('done', bar === 'done');
+    $('pleft').textContent = bar === 'bar' && p.total ? t('{done} of {total} MB', { done: MB(p.transferred || 0), total: MB(p.total) }) + (p.bytesPerSecond ? ' · ' + t('{speed} MB/s', { speed: MB(p.bytesPerSecond) }) : '') : '';
+    $('pright').textContent = known ? Math.floor(pct) + ' %' : '';
+
+    $('notes').classList.toggle('hidden', !notes);
+    if (notes) renderNotes(s);
+
+    // Los botones solo se rehacen si cambian, para no perder el foco del teclado a cada avance de la barra.
+    const key = JSON.stringify(buttons);
+    if (key !== lastButtons) {
+      lastButtons = key;
+      const box = $('buttons'); box.textContent = '';
+      for (const [label, action, primary] of buttons) {
+        const b = document.createElement('button');
+        b.textContent = label; if (primary) b.className = 'primary';
+        b.onclick = () => api.action(action);
+        box.append(b);
+        if (primary) setTimeout(() => b.focus(), 0);
+      }
+    }
+  }
+
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') api.action('later'); });
+  api.onState(render);
+  render({ phase: 'idle' });
+</script>
