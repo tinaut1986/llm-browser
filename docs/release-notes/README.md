@@ -13,7 +13,8 @@ branch **before** the tag exists:
 
 The updater window reads the translation from `main` on GitHub
 (`raw.githubusercontent.com/.../main/docs/release-notes/<tag>.<code>.md`), so a translation fixed
-after the release reaches users without a new build. The release body keeps only English.
+after the release reaches users without a new build; a beta not merged into `main` yet is read from
+its own tag. The release body keeps only English.
 
 - 3 to 6 short lines, each starting with `- `, plain text for the user.
 - A **stable** release lists everything since the previous *stable* tag, betas included; a **beta**

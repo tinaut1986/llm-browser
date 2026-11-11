@@ -4,7 +4,8 @@
 //
 // Novedades: como en NSA, un archivo por versión e idioma en docs/release-notes/ (vX.Y.Z.md en inglés,
 // vX.Y.Z.<código>.md en los demás). La traducción se lee de main en GitHub (se puede corregir después
-// de publicar); si falta, el bloque en inglés <!-- llmb-notes --> del cuerpo de la release.
+// de publicar), o del tag si aún no está en main (betas); si falta, el bloque en inglés
+// <!-- llmb-notes --> del cuerpo de la release.
 //
 // Para ver la ventana sin publicar nada (solo en desarrollo): LLMB_UPDATER_DEMO=<carpeta con vX.Y.Z*.md>
 // simula una descarga de la versión más alta de esa carpeta con sus notas.
@@ -16,7 +17,7 @@ const I18n = require('./i18n');
 
 const RELEASES = 'https://github.com/tinaut1986/llm-browser/releases';
 const API = 'https://api.github.com/repos/tinaut1986/llm-browser/releases?per_page=30';
-const RAW_NOTES = 'https://raw.githubusercontent.com/tinaut1986/llm-browser/main/docs/release-notes/';
+const RAW = 'https://raw.githubusercontent.com/tinaut1986/llm-browser';
 const CHECK_EVERY = 6 * 3600 * 1000;
 
 // Líneas "- ..." de unas notas (sin marcas de Markdown); si no hay viñetas, las líneas de texto.
@@ -45,7 +46,9 @@ async function fetchNotes({ betas, lang, current }) {
     return v && !r.draft && (betas || !r.prerelease) && semver.gt(v, current);
   });
   const notes = await Promise.all(list.map(async r => {
-    const own = lang !== 'en' ? await fetchText(`${RAW_NOTES}${r.tag_name}.${lang}.md`) : null;
+    // main primero (traducciones corregidas tras publicar); una beta aún no fusionada solo las tiene en su tag.
+    const file = `docs/release-notes/${r.tag_name}.${lang}.md`;
+    const own = lang !== 'en' ? (await fetchText(`${RAW}/main/${file}`)) || (await fetchText(`${RAW}/${r.tag_name}/${file}`)) : null;
     const lines = noteLines(own || bodyBlock(r.body));
     return { version: semver.valid(r.tag_name), beta: !!r.prerelease, lines, translated: lang === 'en' || !!(own && lines.length) };
   }));
