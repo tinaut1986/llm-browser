@@ -43,6 +43,23 @@ const saveSettings = () => {
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings));
   } catch {}
 };
+// "Mantener activo": si Windows da la ventana por tapada (u otra app delante), Chromium deja de pintar
+// la página, retiene los eventos de ratón del modelo y llega a perder pulsaciones. Estas opciones solo
+// valen al arrancar, así que cambiarlo reinicia el navegador (reabriendo las pestañas).
+if (settings.keepActive) {
+  app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+  app.commandLine.appendSwitch('disable-renderer-backgrounding');
+}
+function setKeepActive(on) {
+  on = !!on;
+  if (on === !!settings.keepActive) return `Mantener activo ya estaba ${on ? 'activado' : 'desactivado'}; no hace falta reiniciar.`;
+  settings.keepActive = on;
+  settings.restoreTabs = { urls: tabs.map(t => t.url || 'about:blank'), active: tabs.findIndex(t => t.id === activeId) };
+  saveSettings();
+  setTimeout(() => { app.relaunch(); app.quit(); }, 300);
+  return `Mantener activo ${on ? 'activado' : 'desactivado'}. El navegador se reinicia ahora y reabre las ${tabs.length} pestañas; espera unos segundos antes de la siguiente acción.`;
+}
 let engine = ENGINES[settings.engine] ? settings.engine : 'duckduckgo';
 const homeUrl = () => ENGINES[engine].home;
 function setEngine(id) {
@@ -453,6 +470,8 @@ function refreshMenu() {
     betas: wantsBetas,
     setBetas,
     checkUpdates: checkUpdatesNow,
+    keepActive: () => !!settings.keepActive,
+    setKeepActive,
     about: () => dialog.showMessageBox(win, { type: 'info', title: 'LLM Browser', message: 'LLM Browser ' + app.getVersion(), detail: 'Navegador que un LLM puede ver y controlar vía MCP.\nhttps://github.com/tinaut1986/llm-browser', buttons: ['Aceptar'] }),
     openProject: () => shell.openExternal('https://github.com/tinaut1986/llm-browser'),
     openConfig: () => { fs.mkdirSync(CONFIG_DIR, { recursive: true }); shell.openPath(CONFIG_DIR); },
@@ -499,6 +518,8 @@ const call = makeTools({
   closeTab,
   select: selectTab,
   isActEnabled: () => actEnabled,
+  keepActive: () => !!settings.keepActive,
+  setKeepActive,
   searchUrl: q => ENGINES[engine].search.replace('%s', encodeURIComponent(q)),
 });
 
@@ -572,7 +593,12 @@ app.whenReady().then(() => {
 
   ipcMain.handle('bm', (_e, a) => bookmarkOp(a));
 
-  newTab(homeUrl());
+  // Tras reiniciar por "Mantener activo" se reabren las pestañas que había (la sesión y las cookies ya persisten).
+  const restore = settings.restoreTabs;
+  if (restore) { delete settings.restoreTabs; saveSettings(); }
+  const reopened = (restore?.urls || []).filter(u => /^(https?|about):/i.test(u)).map(u => newTab(u));
+  if (reopened.length) selectTab((reopened[restore.active] || reopened[0]).id);
+  else newTab(homeUrl());
   startApi();
   layout();
   writeMcpSnippet();

@@ -160,15 +160,52 @@ module.exports = function makeTools(ctx) {
       await moveTo(x, y);
       return { text: `ratón en (${x},${y})` };
     },
+    // Drag & drop HTML5 (draggable, dragstart/drop; p. ej. reordenar canales de Discord): en Windows
+    // Chromium se lo pasa al sistema (DoDragDrop), cuyo bucle modal sigue al ratón físico y deja el
+    // arrastre colgado. Con Input.setInterceptDrags (CDP) el arrastre nativo vuelve aquí y se completa
+    // con Input.dispatchDragEvent; la página recibe dragstart/dragover/drop con isTrusted. El ratón sigue
+    // yendo por sendInputEvent, así que sliders, mapas y librerías de pointer events no cambian. Pausa
+    // tras pulsar y pasos cortos: muchas librerías esperan un umbral de tiempo/distancia para empezar.
     async drag({ x1, y1, x2, y2 }) {
-      const w = wc(), down = ['leftButtonDown'];
-      await moveTo(x1, y1);
-      w.sendInputEvent({ type: 'mouseDown', x: x1, y: y1, button: 'left', clickCount: 1 });
-      await moveTo(x2, y2, down);
-      w.sendInputEvent({ type: 'mouseUp', x: x2, y: y2, button: 'left', clickCount: 1 });
-      await showCursor(ctx.active(), 'click');
+      const w = wc(), t = ctx.active(), d = w.debugger;
+      let attached = false;
+      if (!d.isAttached()) { try { d.attach('1.3'); attached = true; } catch {} }
+      let data = null, entered = false;
+      const onMsg = (_e, method, params) => { if (method === 'Input.dragIntercepted') data = params.data; };
+      d.on('message', onMsg);
+      const send = (m, p) => d.sendCommand(m, p);
+      const press = (type, x, y) => w.sendInputEvent({ type, x, y, button: 'left', clickCount: 1 });
+      const over = async (x, y) => {
+        if (!data) return w.sendInputEvent({ type: 'mouseMove', x, y, modifiers: ['leftButtonDown'] });
+        if (!entered) { entered = true; await send('Input.dispatchDragEvent', { type: 'dragEnter', x, y, data }); }
+        return send('Input.dispatchDragEvent', { type: 'dragOver', x, y, data });
+      };
+      const cursorAt = (x, y) => { t.cursor = { ...t.cursor, x, y }; showCursor(t, 'move'); };
+      try {
+        await send('Input.setInterceptDrags', { enabled: true }).catch(() => {});
+        await moveTo(x1, y1);
+        press('mouseDown', x1, y1);
+        await sleep(150);
+        const dist = Math.hypot(x2 - x1, y2 - y1);
+        const steps = Math.min(40, Math.max(12, Math.round(dist / 12)));
+        for (let i = 1; i <= steps; i++) {
+          const k = i / steps, e = k < .5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
+          const x = Math.round(x1 + (x2 - x1) * e), y = Math.round(y1 + (y2 - y1) * e);
+          await over(x, y);
+          if (i % 4 === 0 || i === steps) cursorAt(x, y);
+          await sleep(i <= 2 ? 60 : 20);
+        }
+        for (let i = 0; i < 3; i++) { await over(x2, y2); await sleep(80); }
+        if (data) await send('Input.dispatchDragEvent', { type: 'drop', x: x2, y: y2, data });
+        press('mouseUp', x2, y2);
+      } finally {
+        d.removeListener('message', onMsg);
+        await send('Input.setInterceptDrags', { enabled: false }).catch(() => {});
+        if (attached) try { d.detach(); } catch {}
+      }
+      await showCursor(t, 'click');
       await waitLoad(w, 3000);
-      return { text: `arrastrado de (${x1},${y1}) a (${x2},${y2})` };
+      return { text: `arrastrado de (${x1},${y1}) a (${x2},${y2})${data ? ' (drag & drop nativo)' : ''}` };
     },
     async wheel({ x, y, dy = 0, dx = 0 }) {
       await moveTo(x, y);
@@ -196,6 +233,10 @@ module.exports = function makeTools(ctx) {
       if (!ok) throw new Error('No se pudo seleccionar la opción');
       return { text: 'ok' };
     },
+    async keep_active({ enabled }) {
+      if (!ctx.setKeepActive) throw new Error('No disponible');
+      return { text: ctx.setKeepActive(enabled !== false) };
+    },
     async evaluate({ code }) {
       // Tras rellenar una contraseña con Bitwarden la página tiene secretos en el DOM: el modelo no puede ejecutar JS hasta la siguiente navegación.
       if (ctx.active()?.secrets) throw new Error('evaluate está bloqueado en esta pestaña: se han rellenado credenciales. Vuelve a estar disponible tras la siguiente navegación.');
@@ -204,7 +245,11 @@ module.exports = function makeTools(ctx) {
     },
   };
 
-  const ACTIONS = new Set(['navigate', 'back', 'forward', 'reload', 'new_tab', 'close_tab', 'click', 'mouse_move', 'drag', 'wheel', 'type', 'press_key', 'scroll', 'select_option', 'evaluate']);
+  const ACTIONS = new Set(['navigate', 'back', 'forward', 'reload', 'new_tab', 'close_tab', 'click', 'mouse_move', 'drag', 'wheel', 'type', 'press_key', 'scroll', 'select_option', 'evaluate', 'keep_active']);
+  // Acciones de ratón/teclado que Chromium retiene (o pierde) si da la página por oculta.
+  const INPUT = new Set(['click', 'mouse_move', 'drag', 'wheel', 'type', 'press_key']);
+  const HIDDEN_HINT = '\n\nAviso: la página está oculta (ventana tapada o minimizada); los eventos de ratón y teclado pueden retenerse o perderse. Si la acción no ha surtido efecto, llama a keep_active (reinicia el navegador conservando las pestañas) o pide al usuario que deje la ventana visible.';
+  const isHidden = async () => !ctx.keepActive?.() && await evalIn('document.visibilityState').then(v => v === 'hidden', () => false);
 
   // opts.user: la acción la inicia el usuario (barra de URL), no el modelo: no depende del interruptor ni de la lista de esquemas.
   return async function call(name, args, opts = {}) {
@@ -212,7 +257,9 @@ module.exports = function makeTools(ctx) {
     if (!opts.user && ACTIONS.has(name) && !ctx.isActEnabled()) {
       throw new Error('El usuario ha desactivado las acciones del modelo (interruptor en la barra del navegador). Solo puedes leer.');
     }
-    return tools[name](args || {}, opts);
+    const hidden = !opts.user && INPUT.has(name) && await isHidden();
+    const r = await tools[name](args || {}, opts);
+    return hidden && r.text ? { ...r, text: r.text + HIDDEN_HINT } : r;
   };
 };
 
