@@ -9,10 +9,12 @@ Navegador Electron (Windows/Linux/macOS) que un LLM puede ver y controlar vía M
 
 ## Herramientas
 Lectura: `read_page` (texto + `[ref]` interactivos), `get_text`, `screenshot`, `tabs`, `console_logs`, `select_tab`.
-Acciones: `navigate`, `back`, `forward`, `reload`, `new_tab`, `close_tab`, `click`, `mouse_move`, `drag`, `wheel`, `type`, `press_key`, `scroll`, `select_option`, `evaluate`.
+Acciones: `navigate`, `back`, `forward`, `reload`, `new_tab`, `close_tab`, `click`, `mouse_move`, `drag`, `wheel`, `type`, `press_key`, `scroll`, `select_option`, `evaluate`, `keep_active`.
 Los `ref` solo valen hasta la siguiente llamada a `read_page`.
 El modelo solo puede navegar a `http`, `https` y `about:` (no `file:`, `data:`, `javascript:`); la barra de URL del usuario no tiene esa limitación y funciona también en modo solo lectura.
-El ratón del modelo es virtual: se ve como un círculo rojo en la página (se desvanece a los 6 s sin uso). `click`, `mouse_move`, `drag` y `wheel` lo mueven y generan eventos de ratón reales; las coordenadas son píxeles de la captura.
+El ratón del modelo es virtual: se ve como un círculo rojo en la página (se desvanece a los 6 s sin uso). `click`, `mouse_move`, `drag` y `wheel` lo mueven y generan eventos de ratón reales; las coordenadas son píxeles de la captura. `drag` también completa el drag & drop HTML5 nativo (reordenar listas o canales), que en Windows se quedaba colgado.
+
+Si la ventana está tapada o minimizada, Chromium retiene o pierde los eventos de ratón y teclado; las acciones lo avisan y `keep_active` (o Ajustes → Mantener activo) reinicia el navegador con la página siempre activa, reabriendo las pestañas.
 
 ## Instalar
 Descarga el instalador de la [última versión](https://github.com/tinaut1986/llm-browser/releases/latest):

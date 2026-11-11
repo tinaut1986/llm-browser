@@ -48,6 +48,8 @@ module.exports = function menuTemplate(h) {
         { label: 'Beta', type: 'radio', checked: h.betas(), click: () => h.setBetas(true) },
       ] },
       { label: 'Buscar actualizaciones ahora', click: h.checkUpdates },
+      { type: 'separator' },
+      { label: 'Mantener activo aunque la ventana esté tapada (reinicia)', type: 'checkbox', checked: h.keepActive(), click: i => h.setKeepActive(i.checked) },
     ] },
     { label: 'Ayuda', submenu: [
       { label: 'Acerca de LLM Browser', click: h.about },

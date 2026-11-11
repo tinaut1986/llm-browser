@@ -54,3 +54,21 @@ test('evaluate is blocked while credentials are in the page', async () => {
   tab.secrets = true;
   await assert.rejects(call('evaluate', { code: 'document.title' }), /bloqueado/);
 });
+
+test('input actions warn when the page is hidden', async () => {
+  const { ctx, tab } = makeCtx();
+  Object.assign(tab.view.webContents, { executeJavaScript: async () => 'hidden', sendInputEvent: () => {} });
+  const call = makeTools(ctx);
+  assert.match((await call('press_key', { key: 'a' })).text, /keep_active/);
+  const kept = makeTools({ ...ctx, keepActive: () => true });
+  assert.doesNotMatch((await kept('press_key', { key: 'a' })).text, /keep_active/);
+});
+
+test('keep_active is an action and reaches main', async () => {
+  const seen = [];
+  const { ctx } = makeCtx({ setKeepActive: on => { seen.push(on); return 'ok'; } });
+  await makeTools(ctx)('keep_active', {});
+  await makeTools(ctx)('keep_active', { enabled: false });
+  assert.deepStrictEqual(seen, [true, false]);
+  await assert.rejects(makeTools({ ...ctx, isActEnabled: () => false })('keep_active', {}), /desactivado/);
+});

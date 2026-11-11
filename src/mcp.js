@@ -78,6 +78,7 @@ def('type', 'Escribe texto en el elemento indicado (o el enfocado). clear borra 
 def('press_key', 'Pulsa una tecla (Enter, Tab, Escape, Backspace, ArrowDown, PageDown, a, ...).', { key: z.string(), modifiers: z.array(z.enum(['shift', 'control', 'alt', 'meta'])).optional() });
 def('scroll', 'Desplaza la página (o el elemento ref) dy/dx píxeles; dy positivo = hacia abajo.', { dy: z.number().optional(), dx: z.number().optional(), ref: z.number().optional() });
 def('select_option', 'Elige una opción de un <select> por valor o texto.', { ref: z.number(), value: z.string() });
+def('keep_active', 'Mantiene la página activa aunque la ventana del navegador esté tapada o en segundo plano (si no, Chromium retiene o pierde los clics y teclas). Úsalo si una acción avisa de que la página está oculta. Reinicia el navegador reabriendo las pestañas (la sesión se conserva). enabled:false lo desactiva.', { enabled: z.boolean().optional() });
 def('evaluate', 'Ejecuta JavaScript en la página y devuelve el resultado.', { code: z.string() });
 
 server.connect(new StdioServerTransport());

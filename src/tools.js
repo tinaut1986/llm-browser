@@ -233,6 +233,10 @@ module.exports = function makeTools(ctx) {
       if (!ok) throw new Error('No se pudo seleccionar la opción');
       return { text: 'ok' };
     },
+    async keep_active({ enabled }) {
+      if (!ctx.setKeepActive) throw new Error('No disponible');
+      return { text: ctx.setKeepActive(enabled !== false) };
+    },
     async evaluate({ code }) {
       // Tras rellenar una contraseña con Bitwarden la página tiene secretos en el DOM: el modelo no puede ejecutar JS hasta la siguiente navegación.
       if (ctx.active()?.secrets) throw new Error('evaluate está bloqueado en esta pestaña: se han rellenado credenciales. Vuelve a estar disponible tras la siguiente navegación.');
@@ -241,7 +245,11 @@ module.exports = function makeTools(ctx) {
     },
   };
 
-  const ACTIONS = new Set(['navigate', 'back', 'forward', 'reload', 'new_tab', 'close_tab', 'click', 'mouse_move', 'drag', 'wheel', 'type', 'press_key', 'scroll', 'select_option', 'evaluate']);
+  const ACTIONS = new Set(['navigate', 'back', 'forward', 'reload', 'new_tab', 'close_tab', 'click', 'mouse_move', 'drag', 'wheel', 'type', 'press_key', 'scroll', 'select_option', 'evaluate', 'keep_active']);
+  // Acciones de ratón/teclado que Chromium retiene (o pierde) si da la página por oculta.
+  const INPUT = new Set(['click', 'mouse_move', 'drag', 'wheel', 'type', 'press_key']);
+  const HIDDEN_HINT = '\n\nAviso: la página está oculta (ventana tapada o minimizada); los eventos de ratón y teclado pueden retenerse o perderse. Si la acción no ha surtido efecto, llama a keep_active (reinicia el navegador conservando las pestañas) o pide al usuario que deje la ventana visible.';
+  const isHidden = async () => !ctx.keepActive?.() && await evalIn('document.visibilityState').then(v => v === 'hidden', () => false);
 
   // opts.user: la acción la inicia el usuario (barra de URL), no el modelo: no depende del interruptor ni de la lista de esquemas.
   return async function call(name, args, opts = {}) {
@@ -249,7 +257,9 @@ module.exports = function makeTools(ctx) {
     if (!opts.user && ACTIONS.has(name) && !ctx.isActEnabled()) {
       throw new Error('El usuario ha desactivado las acciones del modelo (interruptor en la barra del navegador). Solo puedes leer.');
     }
-    return tools[name](args || {}, opts);
+    const hidden = !opts.user && INPUT.has(name) && await isHidden();
+    const r = await tools[name](args || {}, opts);
+    return hidden && r.text ? { ...r, text: r.text + HIDDEN_HINT } : r;
   };
 };
 
